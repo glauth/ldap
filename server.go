@@ -45,7 +45,6 @@ type Closer interface {
 	Close(boundDN string, conn net.Conn) error
 }
 
-//
 type Server struct {
 	BindFns     map[string]Binder
 	SearchFns   map[string]Searcher
@@ -61,6 +60,9 @@ type Server struct {
 	Quit        chan bool
 	EnforceLDAP bool
 	Stats       *Stats
+
+	// If set, server will accept StartTLS.
+	TLSConfig *tls.Config
 }
 
 type Stats struct {
@@ -78,7 +80,6 @@ type ServerSearchResult struct {
 	ResultCode LDAPResultCode
 }
 
-//
 func NewServer() *Server {
 	s := new(Server)
 	s.Quit = make(chan bool)
@@ -214,13 +215,12 @@ listener:
 	return nil
 }
 
-//Close closes the underlying net.Listener, and waits for confirmation
+// Close closes the underlying net.Listener, and waits for confirmation
 func (server *Server) Close() {
 	server.Quit <- true
 	<-server.Quit
 }
 
-//
 func (server *Server) handleConnection(conn net.Conn) {
 	boundDN := "" // "" == anonymous
 
@@ -308,11 +308,26 @@ handler:
 			server.Stats.countUnbinds(1)
 			break handler // simply disconnect
 		case ApplicationExtendedRequest:
-			ldapResultCode := HandleExtendedRequest(req, boundDN, server.ExtendedFns, conn)
+			var tlsConn *tls.Conn
+			if n := len(req.Children); n == 1 || n == 2 {
+				if name := ber.DecodeString(req.Children[0].Data.Bytes()); name == oidStartTLS {
+					tlsConn = tls.Server(conn, server.TLSConfig)
+				}
+			}
+			var ldapResultCode LDAPResultCode
+			if tlsConn == nil {
+				// Wasn't an upgrade. Pass through.
+				ldapResultCode = HandleExtendedRequest(req, boundDN, server.ExtendedFns, conn)
+			} else {
+				ldapResultCode = LDAPResultSuccess
+			}
 			responsePacket := encodeLDAPResponse(messageID, ApplicationExtendedResponse, ldapResultCode, LDAPResultCodeMap[ldapResultCode])
 			if err = sendPacket(conn, responsePacket); err != nil {
 				log.Printf("sendPacket error %s", err.Error())
 				break handler
+			}
+			if tlsConn != nil {
+				conn = tlsConn
 			}
 		case ApplicationAbandonRequest:
 			HandleAbandonRequest(req, boundDN, server.AbandonFns, conn)
@@ -363,7 +378,6 @@ handler:
 	conn.Close()
 }
 
-//
 func sendPacket(conn net.Conn, packet *ber.Packet) error {
 	_, err := conn.Write(packet.Bytes())
 	if err != nil {
@@ -373,7 +387,6 @@ func sendPacket(conn net.Conn, packet *ber.Packet) error {
 	return nil
 }
 
-//
 func routeFunc(dn string, funcNames []string) string {
 	bestPick := ""
 	bestPickWeight := 0
@@ -396,7 +409,6 @@ func routeFunc(dn string, funcNames []string) string {
 	return bestPick
 }
 
-//
 func encodeLDAPResponse(messageID uint64, responseType uint8, ldapResultCode LDAPResultCode, message string) *ber.Packet {
 	responsePacket := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "LDAP Response")
 	responsePacket.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, messageID, "Message ID"))
@@ -408,7 +420,6 @@ func encodeLDAPResponse(messageID uint64, responseType uint8, ldapResultCode LDA
 	return responsePacket
 }
 
-//
 type defaultHandler struct {
 }
 
@@ -447,7 +458,6 @@ func (h defaultHandler) Close(boundDN string, conn net.Conn) error {
 	return nil
 }
 
-//
 func (stats *Stats) countConns(delta int) {
 	if stats != nil {
 		stats.statsMutex.Lock()
