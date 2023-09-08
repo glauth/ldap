@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nmcclain/asn1-ber"
+	ber "github.com/go-asn1-ber/asn1-ber"
 )
 
 const (
@@ -296,7 +296,7 @@ func (l *Conn) reader() {
 		addLDAPDescriptions(packet)
 		message := &messagePacket{
 			Op:        MessageResponse,
-			MessageID: packet.Children[0].Value.(uint64),
+			MessageID: uint64(packet.Children[0].Value.(int64)), //figure out if its really unsigned
 			Packet:    packet,
 		}
 		if !l.sendProcessMessage(message) {

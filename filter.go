@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	ber "github.com/nmcclain/asn1-ber"
+	ber "github.com/go-asn1-ber/asn1-ber"
 )
 
 const (
@@ -26,7 +26,7 @@ const (
 	FilterExtensibleMatch = 9
 )
 
-var FilterMap = map[uint8]string{
+var FilterMap = map[ber.Tag]string{
 	FilterAnd:             "And",
 	FilterOr:              "Or",
 	FilterNot:             "Not",

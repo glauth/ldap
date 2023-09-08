@@ -4,7 +4,7 @@ import (
 	"log"
 	"net"
 
-	"github.com/nmcclain/asn1-ber"
+	ber "github.com/go-asn1-ber/asn1-ber"
 )
 
 func HandleAddRequest(req *ber.Packet, boundDN string, fns map[string]Adder, conn net.Conn) (resultCode LDAPResultCode) {
@@ -96,7 +96,7 @@ func HandleModifyRequest(req *ber.Packet, boundDN string, fns map[string]Modifie
 			}
 			attr.AttrVals = append(attr.AttrVals, v)
 		}
-		op, ok := change.Children[0].Value.(uint64)
+		op, ok := change.Children[0].Value.(int64)
 		if !ok {
 			return LDAPResultProtocolError
 		}

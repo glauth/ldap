@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/nmcclain/asn1-ber"
+	ber "github.com/go-asn1-ber/asn1-ber"
 )
 
 type Binder interface {
@@ -242,11 +242,12 @@ handler:
 			break
 		}
 		// check the message ID and ClassType
-		messageID, ok := packet.Children[0].Value.(uint64)
+		messageID64, ok := packet.Children[0].Value.(int64)
 		if !ok {
 			log.Print("malformed messageID")
 			break
 		}
+		messageID := uint64(messageID64)
 		req := packet.Children[1]
 		if req.ClassType != ber.ClassApplication {
 			log.Print("req.ClassType != ber.ClassApplication")
@@ -380,7 +381,7 @@ func routeFunc(dn string, funcNames []string) string {
 	dnMatch := "," + strings.ToLower(dn)
 	var weight int
 	for _, fn := range funcNames {
-		if strings.HasSuffix(dnMatch, "," + fn) {
+		if strings.HasSuffix(dnMatch, ","+fn) {
 			//  empty string as 0, no-comma string 1 , etc
 			if fn == "" {
 				weight = 0
@@ -400,7 +401,7 @@ func routeFunc(dn string, funcNames []string) string {
 func encodeLDAPResponse(messageID uint64, responseType uint8, ldapResultCode LDAPResultCode, message string) *ber.Packet {
 	responsePacket := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "LDAP Response")
 	responsePacket.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, messageID, "Message ID"))
-	reponse := ber.Encode(ber.ClassApplication, ber.TypeConstructed, responseType, nil, ApplicationMap[responseType])
+	reponse := ber.Encode(ber.ClassApplication, ber.TypeConstructed, ber.Tag(responseType), nil, ApplicationMap[ber.Tag(responseType)])
 	reponse.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagEnumerated, uint64(ldapResultCode), "resultCode: "))
 	reponse.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, "", "matchedDN: "))
 	reponse.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, message, "errorMessage: "))

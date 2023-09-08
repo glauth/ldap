@@ -6,7 +6,7 @@ import (
 	"net"
 	"strings"
 
-	ber "github.com/nmcclain/asn1-ber"
+	ber "github.com/go-asn1-ber/asn1-ber"
 )
 
 func HandleSearchRequest(req *ber.Packet, controls *[]Control, messageID uint64, boundDN string, server *Server, conn net.Conn) (resultErr error) {
@@ -109,22 +109,22 @@ func parseSearchRequest(boundDN string, req *ber.Packet, controls *[]Control) (S
 	if !ok {
 		return SearchRequest{}, NewError(LDAPResultProtocolError, errors.New("Bad search request"))
 	}
-	s, ok := req.Children[1].Value.(uint64)
+	s, ok := req.Children[1].Value.(int64)
 	if !ok {
 		return SearchRequest{}, NewError(LDAPResultProtocolError, errors.New("Bad search request"))
 	}
 	scope := int(s)
-	d, ok := req.Children[2].Value.(uint64)
+	d, ok := req.Children[2].Value.(int64)
 	if !ok {
 		return SearchRequest{}, NewError(LDAPResultProtocolError, errors.New("Bad search request"))
 	}
 	derefAliases := int(d)
-	s, ok = req.Children[3].Value.(uint64)
+	s, ok = req.Children[3].Value.(int64)
 	if !ok {
 		return SearchRequest{}, NewError(LDAPResultProtocolError, errors.New("Bad search request"))
 	}
 	sizeLimit := int(s)
-	t, ok := req.Children[4].Value.(uint64)
+	t, ok := req.Children[4].Value.(int64)
 	if !ok {
 		return SearchRequest{}, NewError(LDAPResultProtocolError, errors.New("Bad search request"))
 	}
