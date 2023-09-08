@@ -157,11 +157,7 @@ func (server *Server) ListenAndServeTLS(listenString string, certFile string, ke
 	if err != nil {
 		return err
 	}
-	err = server.Serve(ln)
-	if err != nil {
-		return err
-	}
-	return nil
+	return server.Serve(ln)
 }
 
 func (server *Server) SetStats(enable bool) {
@@ -185,11 +181,7 @@ func (server *Server) ListenAndServe(listenString string) error {
 	if err != nil {
 		return err
 	}
-	err = server.Serve(ln)
-	if err != nil {
-		return err
-	}
-	return nil
+	return server.Serve(ln)
 }
 
 func (server *Server) Serve(ln net.Listener) error {
@@ -215,10 +207,17 @@ listener:
 			go server.handleConnection(c)
 		case <-server.Quit:
 			ln.Close()
+			close(server.Quit)
 			break listener
 		}
 	}
 	return nil
+}
+
+//Close closes the underlying net.Listener, and waits for confirmation
+func (server *Server) Close() {
+	server.Quit <- true
+	<-server.Quit
 }
 
 //

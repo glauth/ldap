@@ -17,12 +17,10 @@ var serverBaseDN = "o=testers,c=test"
 
 /////////////////////////
 func TestBindAnonOK(t *testing.T) {
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
+	s.BindFunc("", bindAnonOK{})
 	go func() {
-		s := NewServer()
-		s.QuitChannel(quit)
-		s.BindFunc("", bindAnonOK{})
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
@@ -42,16 +40,14 @@ func TestBindAnonOK(t *testing.T) {
 	case <-time.After(timeout):
 		t.Errorf("ldapsearch command timed out")
 	}
-	quit <- true
+	s.Close()
 }
 
 /////////////////////////
 func TestBindAnonFail(t *testing.T) {
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
 	go func() {
-		s := NewServer()
-		s.QuitChannel(quit)
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
@@ -72,19 +68,16 @@ func TestBindAnonFail(t *testing.T) {
 	case <-time.After(timeout):
 		t.Errorf("ldapsearch command timed out")
 	}
-	time.Sleep(timeout)
-	quit <- true
+	s.Close()
 }
 
 /////////////////////////
 func TestBindSimpleOK(t *testing.T) {
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
+	s.SearchFunc("", searchSimple{})
+	s.BindFunc("", bindSimple{})
 	go func() {
-		s := NewServer()
-		s.QuitChannel(quit)
-		s.SearchFunc("", searchSimple{})
-		s.BindFunc("", bindSimple{})
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
@@ -107,17 +100,15 @@ func TestBindSimpleOK(t *testing.T) {
 	case <-time.After(timeout):
 		t.Errorf("ldapsearch command timed out")
 	}
-	quit <- true
+	s.Close()
 }
 
 /////////////////////////
 func TestBindSimpleFailBadPw(t *testing.T) {
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
+	s.BindFunc("", bindSimple{})
 	go func() {
-		s := NewServer()
-		s.QuitChannel(quit)
-		s.BindFunc("", bindSimple{})
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
@@ -140,17 +131,15 @@ func TestBindSimpleFailBadPw(t *testing.T) {
 	case <-time.After(timeout):
 		t.Errorf("ldapsearch command timed out")
 	}
-	quit <- true
+	s.Close()
 }
 
 /////////////////////////
 func TestBindSimpleFailBadDn(t *testing.T) {
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
+	s.BindFunc("", bindSimple{})
 	go func() {
-		s := NewServer()
-		s.QuitChannel(quit)
-		s.BindFunc("", bindSimple{})
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
@@ -173,19 +162,17 @@ func TestBindSimpleFailBadDn(t *testing.T) {
 	case <-time.After(timeout):
 		t.Errorf("ldapsearch command timed out")
 	}
-	quit <- true
+	s.Close()
 }
 
 /////////////////////////
 func TestBindSSL(t *testing.T) {
 	ldapURLSSL := "ldaps://" + listenString
 	longerTimeout := 300 * time.Millisecond
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
+	s.BindFunc("", bindAnonOK{})
 	go func() {
-		s := NewServer()
-		s.QuitChannel(quit)
-		s.BindFunc("", bindAnonOK{})
 		if err := s.ListenAndServeTLS(listenString, "tests/cert_DONOTUSE.pem", "tests/key_DONOTUSE.pem"); err != nil {
 			t.Errorf("s.ListenAndServeTLS failed: %s", err.Error())
 		}
@@ -206,17 +193,15 @@ func TestBindSSL(t *testing.T) {
 	case <-time.After(longerTimeout * 2):
 		t.Errorf("ldapsearch command timed out")
 	}
-	quit <- true
+	s.Close()
 }
 
 /////////////////////////
 func TestBindPanic(t *testing.T) {
-	quit := make(chan bool)
 	done := make(chan bool)
+	s := NewServer()
+	s.BindFunc("", bindPanic{})
 	go func() {
-		s := NewServer()
-		s.QuitChannel(quit)
-		s.BindFunc("", bindPanic{})
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
@@ -236,7 +221,7 @@ func TestBindPanic(t *testing.T) {
 	case <-time.After(timeout):
 		t.Errorf("ldapsearch command timed out")
 	}
-	quit <- true
+	s.Close()
 }
 
 /////////////////////////
@@ -253,15 +238,13 @@ func TestSearchStats(t *testing.T) {
 	w := testStatsWriter{&bytes.Buffer{}}
 	log.SetOutput(w)
 
-	quit := make(chan bool)
 	done := make(chan bool)
 	s := NewServer()
 
+	s.SearchFunc("", searchSimple{})
+	s.BindFunc("", bindAnonOK{})
+	s.SetStats(true)
 	go func() {
-		s.QuitChannel(quit)
-		s.SearchFunc("", searchSimple{})
-		s.BindFunc("", bindAnonOK{})
-		s.SetStats(true)
 		if err := s.ListenAndServe(listenString); err != nil {
 			t.Errorf("s.ListenAndServe failed: %s", err.Error())
 		}
@@ -287,7 +270,7 @@ func TestSearchStats(t *testing.T) {
 	if stats.Conns != 1 || stats.Binds != 1 {
 		t.Errorf("Stats data missing or incorrect: %v", w.buffer.String())
 	}
-	quit <- true
+	s.Close()
 }
 
 /////////////////////////
@@ -338,7 +321,6 @@ func (b bindCaseInsensitive) Bind(bindDN, bindSimplePw string, conn net.Conn) (L
 	}
 	return LDAPResultInvalidCredentials, nil
 }
-
 
 type searchSimple struct {
 }
@@ -420,7 +402,6 @@ func (s searchControls) Search(boundDN string, searchReq SearchRequest, conn net
 	return ServerSearchResult{entries, []string{}, []Control{}, LDAPResultSuccess}, nil
 }
 
-
 type searchCaseInsensitive struct {
 }
 
@@ -438,7 +419,6 @@ func (s searchCaseInsensitive) Search(boundDN string, searchReq SearchRequest, c
 	}
 	return ServerSearchResult{entries, []string{}, []Control{}, LDAPResultSuccess}, nil
 }
-
 
 func TestRouteFunc(t *testing.T) {
 	if routeFunc("", []string{"a", "xyz", "tt"}) != "" {
