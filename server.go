@@ -229,7 +229,7 @@ handler:
 	for {
 		// read incoming LDAP packet
 		packet, err := ber.ReadPacket(conn)
-		if err == io.EOF { // Client closed connection
+		if err == io.EOF || err == io.ErrUnexpectedEOF { // Client closed connection
 			break
 		} else if err != nil {
 			log.Printf("handleConnection ber.ReadPacket ERROR: %s", err.Error())
