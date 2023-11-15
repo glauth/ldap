@@ -7,7 +7,7 @@ import (
 )
 
 // debbuging type
-//     - has a Printf method to write the debug output
+//   - has a Printf method to write the debug output
 type debugging bool
 
 // write debug output

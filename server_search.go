@@ -98,7 +98,7 @@ func HandleSearchRequest(req *ber.Packet, controls *[]Control, messageID uint64,
 	return nil
 }
 
-/////////////////////////
+// ///////////////////////
 func parseSearchRequest(boundDN string, req *ber.Packet, controls *[]Control) (SearchRequest, error) {
 	if len(req.Children) != 8 {
 		return SearchRequest{}, NewError(LDAPResultOperationsError, errors.New("Bad search request"))
@@ -155,7 +155,7 @@ func parseSearchRequest(boundDN string, req *ber.Packet, controls *[]Control) (S
 	return searchReq, nil
 }
 
-/////////////////////////
+// ///////////////////////
 func filterAttributes(entry *Entry, attributes []string) (*Entry, error) {
 	// only return requested attributes
 	newAttributes := []*EntryAttribute{}
@@ -193,7 +193,7 @@ func filterAttributes(entry *Entry, attributes []string) (*Entry, error) {
 	return entry, nil
 }
 
-/////////////////////////
+// ///////////////////////
 func encodeSearchResponse(messageID uint64, req SearchRequest, res *Entry) *ber.Packet {
 	responsePacket := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "LDAP Response")
 	responsePacket.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, messageID, "Message ID"))

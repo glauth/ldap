@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-//
 func TestAdd(t *testing.T) {
 	done := make(chan bool)
 	s := NewServer()
@@ -43,7 +42,6 @@ func TestAdd(t *testing.T) {
 	s.Close()
 }
 
-//
 func TestDelete(t *testing.T) {
 	done := make(chan bool)
 	s := NewServer()
@@ -145,7 +143,6 @@ func TestModifyDN(t *testing.T) {
 }
 */
 
-//
 type modifyTestHandler struct {
 }
 

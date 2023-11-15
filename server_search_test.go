@@ -7,7 +7,6 @@ import (
 	"time"
 )
 
-//
 func TestSearchSimpleOK(t *testing.T) {
 	done := make(chan bool)
 	s := NewServer()
@@ -141,7 +140,7 @@ func TestSearchSizelimit(t *testing.T) {
 	s.Close()
 }
 
-/////////////////////////
+// ///////////////////////
 func TestBindSearchMulti(t *testing.T) {
 	done := make(chan bool)
 	s := NewServer()
@@ -185,7 +184,7 @@ func TestBindSearchMulti(t *testing.T) {
 	s.Close()
 }
 
-/////////////////////////
+// ///////////////////////
 func TestSearchPanic(t *testing.T) {
 	done := make(chan bool)
 	s := NewServer()
@@ -214,7 +213,7 @@ func TestSearchPanic(t *testing.T) {
 	s.Close()
 }
 
-/////////////////////////
+// ///////////////////////
 type compileSearchFilterTest struct {
 	name         string
 	filterStr    string
@@ -249,7 +248,7 @@ var searchFilterTestFilters = []compileSearchFilterTest{
 	*/
 }
 
-/////////////////////////
+// ///////////////////////
 func TestSearchFiltering(t *testing.T) {
 	done := make(chan bool)
 	s := NewServer()
@@ -284,7 +283,7 @@ func TestSearchFiltering(t *testing.T) {
 	s.Close()
 }
 
-/////////////////////////
+// ///////////////////////
 func TestSearchAttributes(t *testing.T) {
 	done := make(chan bool)
 	s := NewServer()
@@ -376,7 +375,7 @@ func TestSearchAllUserAttributes(t *testing.T) {
 	s.Close()
 }
 
-/////////////////////////
+// ///////////////////////
 func TestSearchScope(t *testing.T) {
 	done := make(chan bool)
 	s := NewServer()
@@ -434,7 +433,7 @@ func TestSearchScope(t *testing.T) {
 	s.Close()
 }
 
-/////////////////////////
+// ///////////////////////
 func TestSearchScopeCaseInsensitive(t *testing.T) {
 	done := make(chan bool)
 	s := NewServer()

@@ -1,3 +1,4 @@
+//go:build ignore
 // +build ignore
 
 package main
@@ -17,7 +18,7 @@ import (
 // ldapsearch -H ldap://localhost:3389 -x -b 'dn=test,dn=com' 'uidnumber=5000'
 /////////////
 
-///////////// Run a simple LDAP server
+// /////////// Run a simple LDAP server
 func main() {
 	s := ldap.NewServer()
 
@@ -37,7 +38,7 @@ func main() {
 type ldapHandler struct {
 }
 
-///////////// Allow anonymous binds only
+// /////////// Allow anonymous binds only
 func (h ldapHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (ldap.LDAPResultCode, error) {
 	if bindDN == "" && bindSimplePw == "" {
 		return ldap.LDAPResultSuccess, nil
@@ -45,7 +46,7 @@ func (h ldapHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (ldap.LDAP
 	return ldap.LDAPResultInvalidCredentials, nil
 }
 
-///////////// Return some hardcoded search results - we'll respond to any baseDN for testing
+// /////////// Return some hardcoded search results - we'll respond to any baseDN for testing
 func (h ldapHandler) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ldap.ServerSearchResult, error) {
 	entries := []*ldap.Entry{
 		&ldap.Entry{"cn=ned," + searchReq.BaseDN, []*ldap.EntryAttribute{
