@@ -7,7 +7,7 @@ import (
 	"log"
 	"net"
 
-	"github.com/nmcclain/ldap"
+	"github.com/shipperizer/ldap"
 )
 
 /////////////
