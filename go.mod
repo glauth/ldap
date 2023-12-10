@@ -1,4 +1,4 @@
-module github.com/shipperizer/ldap
+module github.com/glauth/ldap
 
 go 1.14
 

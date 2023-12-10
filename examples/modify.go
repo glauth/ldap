@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/shipperizer/ldap"
+	"github.com/glauth/ldap"
 )
 
 var (

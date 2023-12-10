@@ -7,7 +7,7 @@ import (
 	"log"
 	"net"
 
-	"github.com/shipperizer/ldap"
+	"github.com/glauth/ldap"
 )
 
 /////////////
