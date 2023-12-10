@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nmcclain/asn1-ber"
+	ber "github.com/go-asn1-ber/asn1-ber"
 )
 
 const (
@@ -21,6 +21,8 @@ const (
 	MessageResponse = 2
 	MessageFinish   = 3
 )
+
+const oidStartTLS = "1.3.6.1.4.1.1466.20037"
 
 type messagePacket struct {
 	Op        int
@@ -150,7 +152,7 @@ func (l *Conn) StartTLS(config *tls.Config) error {
 	packet := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "LDAP Request")
 	packet.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, messageID, "MessageID"))
 	request := ber.Encode(ber.ClassApplication, ber.TypeConstructed, ApplicationExtendedRequest, nil, "Start TLS")
-	request.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, 0, "1.3.6.1.4.1.1466.20037", "TLS Extended Command"))
+	request.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, 0, oidStartTLS, "TLS Extended Command"))
 	packet.AppendChild(request)
 	l.Debug.PrintPacket(packet)
 
@@ -296,7 +298,7 @@ func (l *Conn) reader() {
 		addLDAPDescriptions(packet)
 		message := &messagePacket{
 			Op:        MessageResponse,
-			MessageID: packet.Children[0].Value.(uint64),
+			MessageID: uint64(packet.Children[0].Value.(int64)), //figure out if its really unsigned
 			Packet:    packet,
 		}
 		if !l.sendProcessMessage(message) {

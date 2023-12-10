@@ -1,3 +1,4 @@
+//go:build ignore
 // +build ignore
 
 // Copyright 2014 The Go Authors. All rights reserved.
@@ -11,7 +12,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/nmcclain/ldap"
+	"github.com/glauth/ldap"
 )
 
 var (

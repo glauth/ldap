@@ -3,11 +3,11 @@ package ldap
 import (
 	"log"
 
-	"github.com/nmcclain/asn1-ber"
+	ber "github.com/go-asn1-ber/asn1-ber"
 )
 
 // debbuging type
-//     - has a Printf method to write the debug output
+//   - has a Printf method to write the debug output
 type debugging bool
 
 // write debug output

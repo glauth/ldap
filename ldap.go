@@ -8,8 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"os"
 
-	"github.com/nmcclain/asn1-ber"
+	ber "github.com/go-asn1-ber/asn1-ber"
 )
 
 // LDAP Application Codes
@@ -36,7 +37,7 @@ const (
 	ApplicationExtendedResponse      = 24
 )
 
-var ApplicationMap = map[uint8]string{
+var ApplicationMap = map[ber.Tag]string{
 	ApplicationBindRequest:           "Bind Request",
 	ApplicationBindResponse:          "Bind Response",
 	ApplicationUnbindRequest:         "Unbind Request",
@@ -307,7 +308,7 @@ func DebugBinaryFile(fileName string) error {
 	if err != nil {
 		return NewError(ErrorDebugging, err)
 	}
-	ber.PrintBytes(file, "")
+	ber.PrintBytes(os.Stdout, file, "")
 	packet := ber.DecodePacket(file)
 	addLDAPDescriptions(packet)
 	ber.PrintPacket(packet)
@@ -332,7 +333,7 @@ func getLDAPResultCode(packet *ber.Packet) (code LDAPResultCode, description str
 	if len(packet.Children) >= 2 {
 		response := packet.Children[1]
 		if response.ClassType == ber.ClassApplication && response.TagType == ber.TypeConstructed && len(response.Children) == 3 {
-			return LDAPResultCode(response.Children[0].Value.(uint64)), response.Children[2].Value.(string)
+			return LDAPResultCode(response.Children[0].Value.(int64)), response.Children[2].Value.(string)
 		}
 	}
 

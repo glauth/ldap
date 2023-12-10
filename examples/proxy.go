@@ -1,3 +1,4 @@
+//go:build ignore
 // +build ignore
 
 package main
@@ -9,7 +10,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/nmcclain/ldap"
+	"github.com/glauth/ldap"
 )
 
 type ldapHandler struct {
@@ -19,7 +20,7 @@ type ldapHandler struct {
 	ldapPort   int
 }
 
-///////////// Run a simple LDAP proxy
+// /////////// Run a simple LDAP proxy
 func main() {
 	s := ldap.NewServer()
 
@@ -38,7 +39,7 @@ func main() {
 	}
 }
 
-/////////////
+// ///////////
 type session struct {
 	id   string
 	c    net.Conn
@@ -63,7 +64,7 @@ func (h ldapHandler) getSession(conn net.Conn) (session, error) {
 	return s, nil
 }
 
-/////////////
+// ///////////
 func (h ldapHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (ldap.LDAPResultCode, error) {
 	s, err := h.getSession(conn)
 	if err != nil {
@@ -75,7 +76,7 @@ func (h ldapHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (ldap.LDAP
 	return ldap.LDAPResultSuccess, nil
 }
 
-/////////////
+// ///////////
 func (h ldapHandler) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ldap.ServerSearchResult, error) {
 	s, err := h.getSession(conn)
 	if err != nil {
