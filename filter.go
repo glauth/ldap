@@ -261,6 +261,11 @@ func ServerApplyFilter(f *ber.Packet, entry *Entry) (bool, LDAPResultCode) {
 		}
 		attribute := f.Children[0].Value.(string)
 		value := f.Children[1].Value.(string)
+		if strings.ToLower(attribute) == "dn" {
+			if strings.EqualFold(entry.DN, value) {
+				return true, LDAPResultSuccess
+			}
+		}
 		for _, a := range entry.Attributes {
 			if strings.EqualFold(a.Name, attribute) {
 				for _, v := range a.Values {
