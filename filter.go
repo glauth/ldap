@@ -262,9 +262,9 @@ func ServerApplyFilter(f *ber.Packet, entry *Entry) (bool, LDAPResultCode) {
 		attribute := f.Children[0].Value.(string)
 		value := f.Children[1].Value.(string)
 		for _, a := range entry.Attributes {
-			if strings.ToLower(a.Name) == strings.ToLower(attribute) {
+			if strings.EqualFold(a.Name, attribute) {
 				for _, v := range a.Values {
-					if strings.ToLower(v) == strings.ToLower(value) {
+					if strings.EqualFold(v, value) {
 						return true, LDAPResultSuccess
 					}
 				}
@@ -272,7 +272,7 @@ func ServerApplyFilter(f *ber.Packet, entry *Entry) (bool, LDAPResultCode) {
 		}
 	case "Present":
 		for _, a := range entry.Attributes {
-			if strings.ToLower(a.Name) == strings.ToLower(f.Data.String()) {
+			if strings.EqualFold(a.Name, f.Data.String()) {
 				return true, LDAPResultSuccess
 			}
 		}
@@ -318,7 +318,7 @@ func ServerApplyFilter(f *ber.Packet, entry *Entry) (bool, LDAPResultCode) {
 		valueBytes := f.Children[1].Children[0].Data.Bytes()
 		valueLower := strings.ToLower(string(valueBytes[:]))
 		for _, a := range entry.Attributes {
-			if strings.ToLower(a.Name) == strings.ToLower(attribute) {
+			if strings.EqualFold(a.Name, attribute) {
 				for _, v := range a.Values {
 					vLower := strings.ToLower(v)
 					switch f.Children[1].Children[0].Tag {
@@ -363,7 +363,7 @@ func parseFilterObjectClass(f *ber.Packet) (string, error) {
 	switch FilterMap[f.Tag] {
 	case "Equality Match":
 		if len(f.Children) != 2 {
-			return "", errors.New("Equality match must have only two children")
+			return "", errors.New("equality match must have only two children")
 		}
 		attribute := strings.ToLower(f.Children[0].Value.(string))
 		value := f.Children[1].Value.(string)
@@ -392,7 +392,7 @@ func parseFilterObjectClass(f *ber.Packet) (string, error) {
 		}
 	case "Not":
 		if len(f.Children) != 1 {
-			return "", errors.New("Not filter must have only one child")
+			return "", errors.New("not filter must have only one child")
 		}
 		subType, err := parseFilterObjectClass(f.Children[0])
 		if err != nil {
