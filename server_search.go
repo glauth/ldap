@@ -95,6 +95,19 @@ func HandleSearchRequest(req *ber.Packet, controls *[]Control, messageID uint64,
 			return NewError(LDAPResultOperationsError, err)
 		}
 	}
+
+	// If we had a paging control, we need to update its cookie if present
+	for _, reqcontrol := range *controls {
+		if reqcontrol.GetControlType() == ControlTypePaging {
+			for _, respcontrol := range searchResp.Controls {
+				if respcontrol.GetControlType() == ControlTypePaging {
+					reqcontrol.(*ControlPaging).Cookie = respcontrol.(*ControlPaging).Cookie
+					break
+				}
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -234,6 +247,17 @@ func encodeSearchDone(messageID uint64, ldapResultCode LDAPResultCode) *ber.Pack
 	donePacket.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, "", "matchedDN: "))
 	donePacket.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, "", "errorMessage: "))
 	responsePacket.AppendChild(donePacket)
+
+	return responsePacket
+}
+
+func encodeSearchDoneWithControls(messageID uint64, ldapResultCode LDAPResultCode, controls []Control) *ber.Packet {
+	responsePacket := encodeSearchDone(messageID, ldapResultCode)
+	controlPacket := ber.Encode(ber.ClassContext, ber.TypeConstructed, 0, nil, "Controls")
+	for _, control := range controls {
+		controlPacket.AppendChild(control.Encode())
+	}
+	responsePacket.AppendChild(controlPacket)
 
 	return responsePacket
 }

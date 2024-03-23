@@ -299,9 +299,23 @@ handler:
 				}
 				break handler
 			} else {
-				if err = sendPacket(conn, encodeSearchDone(messageID, LDAPResultSuccess)); err != nil {
-					log.Printf("sendPacket error %s", err.Error())
-					break handler
+				supportedControls := false
+				for _, control := range controls {
+					if control.GetControlType() == ControlTypePaging {
+						supportedControls = true
+						break
+					}
+				}
+				if supportedControls {
+					if err = sendPacket(conn, encodeSearchDoneWithControls(messageID, LDAPResultSuccess, controls)); err != nil {
+						log.Printf("sendPacket error %s", err.Error())
+						break handler
+					}
+				} else {
+					if err = sendPacket(conn, encodeSearchDone(messageID, LDAPResultSuccess)); err != nil {
+						log.Printf("sendPacket error %s", err.Error())
+						break handler
+					}
 				}
 			}
 		case ApplicationUnbindRequest:
