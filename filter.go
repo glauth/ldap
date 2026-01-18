@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
-	"log"
-	"os"
 
 	ber "github.com/go-asn1-ber/asn1-ber"
 )
@@ -47,18 +45,63 @@ const (
 	FilterSubstringsFinal   = 2
 )
 
-func debugLog(str string) {
-	file, err := os.OpenFile("mypackage.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-    if err != nil {
-        log.Fatalf("Failed to open log file: %v", err)
-    }
-    if 1 == 1 {
-	    log.Fatalf("Failed to open log file")
-    }
-    defer file.Close()
-    log.SetOutput(file)
-    log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
-    log.Println(str)
+func parseExtensibleMatchParts(left string) (string, string, bool, error) {
+	hasLeadingColon := strings.HasPrefix(left, ":")
+	if hasLeadingColon {
+		left = strings.TrimPrefix(left, ":")
+	}
+	if left == "" {
+		return "", "", false, errors.New("ldap: extensible match missing attribute/matchingRule")
+	}
+
+	parts := strings.Split(left, ":")
+	var attrType string
+	var matchingRule string
+	dnAttributes := false
+
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		if part == "dn" {
+			dnAttributes = true
+			continue
+		}
+		if !hasLeadingColon && attrType == "" {
+			attrType = part
+			continue
+		}
+		if matchingRule == "" {
+			matchingRule = part
+			continue
+		}
+		return "", "", false, errors.New("ldap: extensible match has too many components")
+	}
+	if attrType == "" && matchingRule == "" {
+		return "", "", false, errors.New("ldap: extensible match missing attribute/matchingRule")
+	}
+	return attrType, matchingRule, dnAttributes, nil
+}
+
+func appendExtensibleMatch(packet *ber.Packet, left, matchValue string) error {
+	attrType, matchingRule, dnAttributes, err := parseExtensibleMatchParts(left)
+	if err != nil {
+		return err
+	}
+	if matchValue == "" {
+		return errors.New("ldap: extensible match missing match value")
+	}
+	if matchingRule != "" {
+		packet.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, 1, matchingRule, "Matching Rule"))
+	}
+	if attrType != "" {
+		packet.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, 2, attrType, "Type"))
+	}
+	packet.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, 3, matchValue, "Match Value"))
+	if dnAttributes {
+		packet.AppendChild(ber.NewBoolean(ber.ClassContext, ber.TypePrimitive, 4, true, "DN Attributes"))
+	}
+	return nil
 }
 
 func CompileFilter(filter string) (*ber.Packet, error) {
@@ -143,11 +186,45 @@ func DecompileFilter(packet *ber.Packet) (ret string, err error) {
 		ret += "~="
 		ret += ber.DecodeString(packet.Children[1].Data.Bytes())
 	case FilterExtensibleMatch:
-		ret += ber.DecodeString(packet.Children[0].Data.Bytes())
+		var matchingRule string
+		var attrType string
+		var matchValue string
+		dnAttributes := false
+		for _, child := range packet.Children {
+			switch child.Tag {
+			case 1:
+				matchingRule = ber.DecodeString(child.Data.Bytes())
+			case 2:
+				attrType = ber.DecodeString(child.Data.Bytes())
+			case 3:
+				matchValue = ber.DecodeString(child.Data.Bytes())
+			case 4:
+				if child.Value != nil {
+					dnAttributes = child.Value.(bool)
+				}
+			}
+		}
+		left := ""
+		if attrType != "" {
+			left = attrType
+		}
+		if dnAttributes {
+			if left == "" {
+				left = ":dn"
+			} else {
+				left += ":dn"
+			}
+		}
+		if matchingRule != "" {
+			if left == "" {
+				left = ":" + matchingRule
+			} else {
+				left += ":" + matchingRule
+			}
+		}
+		ret += left
 		ret += ":="
-		ret += ber.DecodeString(packet.Children[1].Data.Bytes())
-		ret += "="
-		ret += ber.DecodeString(packet.Children[2].Data.Bytes())
+		ret += matchValue
 	}
 
 	ret += ")"
@@ -245,6 +322,14 @@ func compileFilter(filter string, pos int) (*ber.Packet, int, error) {
 			packet.Data.WriteString(attribute)
 			return packet, newPos + 1, nil
 		}
+		if packet.Tag == FilterExtensibleMatch {
+			err = appendExtensibleMatch(packet, attribute, condition)
+			if err != nil {
+				return packet, newPos, err
+			}
+			newPos++
+			return packet, newPos, err
+		}
 		packet.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, attribute, "Attribute"))
 		switch {
 		case packet.Tag == FilterEqualityMatch && condition[0] == '*' && condition[len(condition)-1] == '*':
@@ -267,16 +352,6 @@ func compileFilter(filter string, pos int) (*ber.Packet, int, error) {
 			packet.Description = FilterMap[packet.Tag]
 			seq := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "Substrings")
 			seq.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, FilterSubstringsInitial, condition[:len(condition)-1], "Initial Substring"))
-			packet.AppendChild(seq)
-		case packet.Tag == FilterExtensibleMatch:
-			// Extensible Match
-			packet.Tag = FilterSubstrings
-			packet.Description = FilterMap[packet.Tag]
-			seq := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "Substrings")
-			//seq.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, FilterSubstringsInitial, condition[:len(condition)-1], "matchingRule"))
-			seq.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, FilterSubstringsInitial, "1.2.840.113556.1.4.1941", "matchingRule"))
-			seq.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, FilterSubstringsInitial, "memberOf", "type"))
-			seq.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, FilterSubstringsInitial, "CN=testgroup,CN=Users,DC=test,DC=local", "matchValue"))
 			packet.AppendChild(seq)
 		default:
 			packet.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, condition, "Condition"))
@@ -374,21 +449,21 @@ func ServerApplyFilter(f *ber.Packet, entry *Entry) (bool, LDAPResultCode) {
 				}
 			}
 		}
-	case "FilterGreaterOrEqual": // TODO
+	case "Greater Or Equal": // TODO
 		return false, LDAPResultOperationsError
-	case "FilterLessOrEqual": // TODO
+	case "Less Or Equal": // TODO
 		return false, LDAPResultOperationsError
-	case "FilterApproxMatch": // TODO
+	case "Approx Match": // TODO
 		return false, LDAPResultOperationsError
-	case "FilterExtensibleMatch": // TODO
-		return false, LDAPResultOperationsError
+	case "Extensible Match":
+		// We don't implement extensible matching server-side; defer to backend results.
+		return true, LDAPResultSuccess
 	}
 
 	return false, LDAPResultSuccess
 }
 
 func GetFilterObjectClass(filter string) (string, error) {
-	debugLog("hello mom and dad")
 	f, err := CompileFilter(filter)
 	if err != nil {
 		return "", err
