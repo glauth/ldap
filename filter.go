@@ -45,6 +45,65 @@ const (
 	FilterSubstringsFinal   = 2
 )
 
+func parseExtensibleMatchParts(left string) (string, string, bool, error) {
+	hasLeadingColon := strings.HasPrefix(left, ":")
+	if hasLeadingColon {
+		left = strings.TrimPrefix(left, ":")
+	}
+	if left == "" {
+		return "", "", false, errors.New("ldap: extensible match missing attribute/matchingRule")
+	}
+
+	parts := strings.Split(left, ":")
+	var attrType string
+	var matchingRule string
+	dnAttributes := false
+
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		if part == "dn" {
+			dnAttributes = true
+			continue
+		}
+		if !hasLeadingColon && attrType == "" {
+			attrType = part
+			continue
+		}
+		if matchingRule == "" {
+			matchingRule = part
+			continue
+		}
+		return "", "", false, errors.New("ldap: extensible match has too many components")
+	}
+	if attrType == "" && matchingRule == "" {
+		return "", "", false, errors.New("ldap: extensible match missing attribute/matchingRule")
+	}
+	return attrType, matchingRule, dnAttributes, nil
+}
+
+func appendExtensibleMatch(packet *ber.Packet, left, matchValue string) error {
+	attrType, matchingRule, dnAttributes, err := parseExtensibleMatchParts(left)
+	if err != nil {
+		return err
+	}
+	if matchValue == "" {
+		return errors.New("ldap: extensible match missing match value")
+	}
+	if matchingRule != "" {
+		packet.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, 1, matchingRule, "Matching Rule"))
+	}
+	if attrType != "" {
+		packet.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, 2, attrType, "Type"))
+	}
+	packet.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, 3, matchValue, "Match Value"))
+	if dnAttributes {
+		packet.AppendChild(ber.NewBoolean(ber.ClassContext, ber.TypePrimitive, 4, true, "DN Attributes"))
+	}
+	return nil
+}
+
 func CompileFilter(filter string) (*ber.Packet, error) {
 	if len(filter) == 0 || filter[0] != '(' {
 		return nil, NewError(ErrorFilterCompile, errors.New("ldap: filter does not start with an '('"))
@@ -126,6 +185,46 @@ func DecompileFilter(packet *ber.Packet) (ret string, err error) {
 		ret += ber.DecodeString(packet.Children[0].Data.Bytes())
 		ret += "~="
 		ret += ber.DecodeString(packet.Children[1].Data.Bytes())
+	case FilterExtensibleMatch:
+		var matchingRule string
+		var attrType string
+		var matchValue string
+		dnAttributes := false
+		for _, child := range packet.Children {
+			switch child.Tag {
+			case 1:
+				matchingRule = ber.DecodeString(child.Data.Bytes())
+			case 2:
+				attrType = ber.DecodeString(child.Data.Bytes())
+			case 3:
+				matchValue = ber.DecodeString(child.Data.Bytes())
+			case 4:
+				if child.Value != nil {
+					dnAttributes = child.Value.(bool)
+				}
+			}
+		}
+		left := ""
+		if attrType != "" {
+			left = attrType
+		}
+		if dnAttributes {
+			if left == "" {
+				left = ":dn"
+			} else {
+				left += ":dn"
+			}
+		}
+		if matchingRule != "" {
+			if left == "" {
+				left = ":" + matchingRule
+			} else {
+				left += ":" + matchingRule
+			}
+		}
+		ret += left
+		ret += ":="
+		ret += matchValue
 	}
 
 	ret += ")"
@@ -197,7 +296,11 @@ func compileFilter(filter string, pos int) (*ber.Packet, int, error) {
 				packet = ber.Encode(ber.ClassContext, ber.TypeConstructed, FilterLessOrEqual, nil, FilterMap[FilterLessOrEqual])
 				newPos++
 			case filter[newPos] == '~' && filter[newPos+1] == '=':
-				packet = ber.Encode(ber.ClassContext, ber.TypeConstructed, FilterApproxMatch, nil, FilterMap[FilterLessOrEqual])
+				// TODO Revert FilterMap to FilterLessOrEqual... I suspect it's a shortcut for lack of implementation
+				packet = ber.Encode(ber.ClassContext, ber.TypeConstructed, FilterApproxMatch, nil, FilterMap[FilterApproxMatch])
+				newPos++
+			case filter[newPos] == ':' && filter[newPos+1] == '=':
+				packet = ber.Encode(ber.ClassContext, ber.TypeConstructed, FilterExtensibleMatch, nil, FilterMap[FilterExtensibleMatch])
 				newPos++
 			case packet == nil:
 				attribute += fmt.Sprintf("%c", filter[newPos])
@@ -218,6 +321,14 @@ func compileFilter(filter string, pos int) (*ber.Packet, int, error) {
 			packet.Description = FilterMap[packet.Tag]
 			packet.Data.WriteString(attribute)
 			return packet, newPos + 1, nil
+		}
+		if packet.Tag == FilterExtensibleMatch {
+			err = appendExtensibleMatch(packet, attribute, condition)
+			if err != nil {
+				return packet, newPos, err
+			}
+			newPos++
+			return packet, newPos, err
 		}
 		packet.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, attribute, "Attribute"))
 		switch {
@@ -338,14 +449,15 @@ func ServerApplyFilter(f *ber.Packet, entry *Entry) (bool, LDAPResultCode) {
 				}
 			}
 		}
-	case "FilterGreaterOrEqual": // TODO
+	case "Greater Or Equal": // TODO
 		return false, LDAPResultOperationsError
-	case "FilterLessOrEqual": // TODO
+	case "Less Or Equal": // TODO
 		return false, LDAPResultOperationsError
-	case "FilterApproxMatch": // TODO
+	case "Approx Match": // TODO
 		return false, LDAPResultOperationsError
-	case "FilterExtensibleMatch": // TODO
-		return false, LDAPResultOperationsError
+	case "Extensible Match":
+		// We don't implement extensible matching server-side; defer to backend results.
+		return true, LDAPResultSuccess
 	}
 
 	return false, LDAPResultSuccess
