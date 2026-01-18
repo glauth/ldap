@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+	"log"
+	"os"
 
 	ber "github.com/go-asn1-ber/asn1-ber"
 )
@@ -44,6 +46,20 @@ const (
 	FilterSubstringsAny     = 1
 	FilterSubstringsFinal   = 2
 )
+
+func debugLog(str string) {
+	file, err := os.OpenFile("mypackage.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+    if err != nil {
+        log.Fatalf("Failed to open log file: %v", err)
+    }
+    if 1 == 1 {
+	    log.Fatalf("Failed to open log file")
+    }
+    defer file.Close()
+    log.SetOutput(file)
+    log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+    log.Println(str)
+}
 
 func CompileFilter(filter string) (*ber.Packet, error) {
 	if len(filter) == 0 || filter[0] != '(' {
@@ -126,6 +142,12 @@ func DecompileFilter(packet *ber.Packet) (ret string, err error) {
 		ret += ber.DecodeString(packet.Children[0].Data.Bytes())
 		ret += "~="
 		ret += ber.DecodeString(packet.Children[1].Data.Bytes())
+	case FilterExtensibleMatch:
+		ret += ber.DecodeString(packet.Children[0].Data.Bytes())
+		ret += ":="
+		ret += ber.DecodeString(packet.Children[1].Data.Bytes())
+		ret += "="
+		ret += ber.DecodeString(packet.Children[2].Data.Bytes())
 	}
 
 	ret += ")"
@@ -197,7 +219,11 @@ func compileFilter(filter string, pos int) (*ber.Packet, int, error) {
 				packet = ber.Encode(ber.ClassContext, ber.TypeConstructed, FilterLessOrEqual, nil, FilterMap[FilterLessOrEqual])
 				newPos++
 			case filter[newPos] == '~' && filter[newPos+1] == '=':
-				packet = ber.Encode(ber.ClassContext, ber.TypeConstructed, FilterApproxMatch, nil, FilterMap[FilterLessOrEqual])
+				// TODO Revert FilterMap to FilterLessOrEqual... I suspect it's a shortcut for lack of implementation
+				packet = ber.Encode(ber.ClassContext, ber.TypeConstructed, FilterApproxMatch, nil, FilterMap[FilterApproxMatch])
+				newPos++
+			case filter[newPos] == ':' && filter[newPos+1] == '=':
+				packet = ber.Encode(ber.ClassContext, ber.TypeConstructed, FilterExtensibleMatch, nil, FilterMap[FilterExtensibleMatch])
 				newPos++
 			case packet == nil:
 				attribute += fmt.Sprintf("%c", filter[newPos])
@@ -241,6 +267,16 @@ func compileFilter(filter string, pos int) (*ber.Packet, int, error) {
 			packet.Description = FilterMap[packet.Tag]
 			seq := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "Substrings")
 			seq.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, FilterSubstringsInitial, condition[:len(condition)-1], "Initial Substring"))
+			packet.AppendChild(seq)
+		case packet.Tag == FilterExtensibleMatch:
+			// Extensible Match
+			packet.Tag = FilterSubstrings
+			packet.Description = FilterMap[packet.Tag]
+			seq := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "Substrings")
+			//seq.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, FilterSubstringsInitial, condition[:len(condition)-1], "matchingRule"))
+			seq.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, FilterSubstringsInitial, "1.2.840.113556.1.4.1941", "matchingRule"))
+			seq.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, FilterSubstringsInitial, "memberOf", "type"))
+			seq.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, FilterSubstringsInitial, "CN=testgroup,CN=Users,DC=test,DC=local", "matchValue"))
 			packet.AppendChild(seq)
 		default:
 			packet.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, condition, "Condition"))
@@ -352,6 +388,7 @@ func ServerApplyFilter(f *ber.Packet, entry *Entry) (bool, LDAPResultCode) {
 }
 
 func GetFilterObjectClass(filter string) (string, error) {
+	debugLog("hello mom and dad")
 	f, err := CompileFilter(filter)
 	if err != nil {
 		return "", err
