@@ -525,7 +525,6 @@ type bindPanic struct {
 
 func (b bindPanic) Bind(bindDN, bindSimplePw string, conn net.Conn) (LDAPResultCode, error) {
 	panic("test panic at the disco")
-	return LDAPResultInvalidCredentials, nil
 }
 
 type bindCaseInsensitive struct {
@@ -543,31 +542,31 @@ type searchSimple struct {
 
 func (s searchSimple) Search(boundDN string, searchReq SearchRequest, conn net.Conn) (ServerSearchResult, error) {
 	entries := []*Entry{
-		&Entry{"cn=ned,o=testers,c=test", []*EntryAttribute{
-			&EntryAttribute{"cn", []string{"ned"}},
-			&EntryAttribute{"o", []string{"ate"}},
-			&EntryAttribute{"uidNumber", []string{"5000"}},
-			&EntryAttribute{"accountstatus", []string{"active"}},
-			&EntryAttribute{"uid", []string{"ned"}},
-			&EntryAttribute{"description", []string{"ned via sa"}},
-			&EntryAttribute{"objectclass", []string{"posixaccount"}},
+		{"cn=ned,o=testers,c=test", []*EntryAttribute{
+			{"cn", []string{"ned"}},
+			{"o", []string{"ate"}},
+			{"uidNumber", []string{"5000"}},
+			{"accountstatus", []string{"active"}},
+			{"uid", []string{"ned"}},
+			{"description", []string{"ned via sa"}},
+			{"objectclass", []string{"posixaccount"}},
 		}},
-		&Entry{"cn=trent,o=testers,c=test", []*EntryAttribute{
-			&EntryAttribute{"cn", []string{"trent"}},
-			&EntryAttribute{"o", []string{"ate"}},
-			&EntryAttribute{"uidNumber", []string{"5005"}},
-			&EntryAttribute{"accountstatus", []string{"active"}},
-			&EntryAttribute{"uid", []string{"trent"}},
-			&EntryAttribute{"description", []string{"trent via sa"}},
-			&EntryAttribute{"objectclass", []string{"posixaccount"}},
+		{"cn=trent,o=testers,c=test", []*EntryAttribute{
+			{"cn", []string{"trent"}},
+			{"o", []string{"ate"}},
+			{"uidNumber", []string{"5005"}},
+			{"accountstatus", []string{"active"}},
+			{"uid", []string{"trent"}},
+			{"description", []string{"trent via sa"}},
+			{"objectclass", []string{"posixaccount"}},
 		}},
-		&Entry{"cn=randy,o=testers,c=test", []*EntryAttribute{
-			&EntryAttribute{"cn", []string{"randy"}},
-			&EntryAttribute{"o", []string{"ate"}},
-			&EntryAttribute{"uidNumber", []string{"5555"}},
-			&EntryAttribute{"accountstatus", []string{"active"}},
-			&EntryAttribute{"uid", []string{"randy"}},
-			&EntryAttribute{"objectclass", []string{"posixaccount"}},
+		{"cn=randy,o=testers,c=test", []*EntryAttribute{
+			{"cn", []string{"randy"}},
+			{"o", []string{"ate"}},
+			{"uidNumber", []string{"5555"}},
+			{"accountstatus", []string{"active"}},
+			{"uid", []string{"randy"}},
+			{"objectclass", []string{"posixaccount"}},
 		}},
 	}
 	return ServerSearchResult{entries, []string{}, []Control{}, LDAPResultSuccess}, nil
@@ -578,13 +577,13 @@ type searchSimple2 struct {
 
 func (s searchSimple2) Search(boundDN string, searchReq SearchRequest, conn net.Conn) (ServerSearchResult, error) {
 	entries := []*Entry{
-		&Entry{"cn=hamburger,o=testers,c=testz", []*EntryAttribute{
-			&EntryAttribute{"cn", []string{"hamburger"}},
-			&EntryAttribute{"o", []string{"testers"}},
-			&EntryAttribute{"uidNumber", []string{"5000"}},
-			&EntryAttribute{"accountstatus", []string{"active"}},
-			&EntryAttribute{"uid", []string{"hamburger"}},
-			&EntryAttribute{"objectclass", []string{"posixaccount"}},
+		{"cn=hamburger,o=testers,c=testz", []*EntryAttribute{
+			{"cn", []string{"hamburger"}},
+			{"o", []string{"testers"}},
+			{"uidNumber", []string{"5000"}},
+			{"accountstatus", []string{"active"}},
+			{"uid", []string{"hamburger"}},
+			{"objectclass", []string{"posixaccount"}},
 		}},
 	}
 	return ServerSearchResult{entries, []string{}, []Control{}, LDAPResultSuccess}, nil
@@ -594,9 +593,7 @@ type searchPanic struct {
 }
 
 func (s searchPanic) Search(boundDN string, searchReq SearchRequest, conn net.Conn) (ServerSearchResult, error) {
-	entries := []*Entry{}
 	panic("this is a test panic")
-	return ServerSearchResult{entries, []string{}, []Control{}, LDAPResultSuccess}, nil
 }
 
 type searchControls struct {
@@ -606,12 +603,12 @@ func (s searchControls) Search(boundDN string, searchReq SearchRequest, conn net
 	entries := []*Entry{}
 	if len(searchReq.Controls) == 1 && searchReq.Controls[0].GetControlType() == "1.2.3.4.5" {
 		newEntry := &Entry{"cn=hamburger,o=testers,c=testz", []*EntryAttribute{
-			&EntryAttribute{"cn", []string{"hamburger"}},
-			&EntryAttribute{"o", []string{"testers"}},
-			&EntryAttribute{"uidNumber", []string{"5000"}},
-			&EntryAttribute{"accountstatus", []string{"active"}},
-			&EntryAttribute{"uid", []string{"hamburger"}},
-			&EntryAttribute{"objectclass", []string{"posixaccount"}},
+			{"cn", []string{"hamburger"}},
+			{"o", []string{"testers"}},
+			{"uidNumber", []string{"5000"}},
+			{"accountstatus", []string{"active"}},
+			{"uid", []string{"hamburger"}},
+			{"objectclass", []string{"posixaccount"}},
 		}}
 		entries = append(entries, newEntry)
 	}
@@ -623,14 +620,14 @@ type searchCaseInsensitive struct {
 
 func (s searchCaseInsensitive) Search(boundDN string, searchReq SearchRequest, conn net.Conn) (ServerSearchResult, error) {
 	entries := []*Entry{
-		&Entry{"cn=CASE,o=testers,c=test", []*EntryAttribute{
-			&EntryAttribute{"cn", []string{"CaSe"}},
-			&EntryAttribute{"o", []string{"ate"}},
-			&EntryAttribute{"uidNumber", []string{"5005"}},
-			&EntryAttribute{"accountstatus", []string{"active"}},
-			&EntryAttribute{"uid", []string{"trent"}},
-			&EntryAttribute{"description", []string{"trent via sa"}},
-			&EntryAttribute{"objectclass", []string{"posixaccount"}},
+		{"cn=CASE,o=testers,c=test", []*EntryAttribute{
+			{"cn", []string{"CaSe"}},
+			{"o", []string{"ate"}},
+			{"uidNumber", []string{"5005"}},
+			{"accountstatus", []string{"active"}},
+			{"uid", []string{"trent"}},
+			{"description", []string{"trent via sa"}},
+			{"objectclass", []string{"posixaccount"}},
 		}},
 	}
 	return ServerSearchResult{entries, []string{}, []Control{}, LDAPResultSuccess}, nil

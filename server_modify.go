@@ -147,7 +147,7 @@ func HandleCompareRequest(req *ber.Packet, boundDN string, fns map[string]Compar
 	if !ok {
 		return LDAPResultProtocolError
 	}
-	compReq.ava = []AttributeValueAssertion{AttributeValueAssertion{attr, val}}
+	compReq.ava = []AttributeValueAssertion{{attr, val}}
 	fnNames := []string{}
 	for k := range fns {
 		fnNames = append(fnNames, k)

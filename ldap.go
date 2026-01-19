@@ -7,7 +7,6 @@ package ldap
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 
 	ber "github.com/go-asn1-ber/asn1-ber"
@@ -304,7 +303,7 @@ func addDefaultLDAPResponseDescriptions(packet *ber.Packet) {
 }
 
 func DebugBinaryFile(fileName string) error {
-	file, err := ioutil.ReadFile(fileName)
+	file, err := os.ReadFile(fileName)
 	if err != nil {
 		return NewError(ErrorDebugging, err)
 	}
