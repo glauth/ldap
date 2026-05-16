@@ -100,8 +100,24 @@ func FindControl(controls []Control, controlType string) Control {
 	return nil
 }
 
-func DecodeControl(packet *ber.Packet) Control {
-	ControlType := packet.Children[0].Value.(string)
+func DecodeControl(packet *ber.Packet) (control Control, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			control = nil
+			err = fmt.Errorf("ldap: failed to decode control: %v", r)
+		}
+	}()
+
+	if packet == nil || len(packet.Children) == 0 {
+		return nil, fmt.Errorf("ldap: failed to decode control: malformed control packet")
+	}
+	if packet.Children[0] == nil {
+		return nil, fmt.Errorf("ldap: failed to decode control: malformed control packet")
+	}
+	ControlType, ok := packet.Children[0].Value.(string)
+	if !ok {
+		return nil, fmt.Errorf("ldap: failed to decode control: malformed control type")
+	}
 	packet.Children[0].Description = "Control Type (" + ControlTypeMap[ControlType] + ")"
 	c := new(ControlString)
 	c.ControlType = ControlType
@@ -111,8 +127,18 @@ func DecodeControl(packet *ber.Packet) Control {
 		value := packet.Children[1]
 		if len(packet.Children) == 3 {
 			value = packet.Children[2]
+			if packet.Children[1] == nil {
+				return nil, fmt.Errorf("ldap: failed to decode control: malformed control criticality")
+			}
 			packet.Children[1].Description = "Criticality"
-			c.Criticality = packet.Children[1].Value.(bool)
+			criticality, ok := packet.Children[1].Value.(bool)
+			if !ok {
+				return nil, fmt.Errorf("ldap: failed to decode control: malformed control criticality")
+			}
+			c.Criticality = criticality
+		}
+		if value == nil {
+			return nil, fmt.Errorf("ldap: failed to decode control: malformed control value")
 		}
 
 		value.Description = "Control Value"
@@ -126,18 +152,33 @@ func DecodeControl(packet *ber.Packet) Control {
 				value.Value = nil
 				value.AppendChild(valueChildren)
 			}
+			// Exactly one controlValue, RFC2696
+			if len(value.Children) != 1 || value.Children[0] == nil {
+				return nil, fmt.Errorf("ldap: failed to decode control: malformed paging control value")
+			}
 			value = value.Children[0]
 			value.Description = "Search Control Value"
+			if len(value.Children) < 2 || value.Children[0] == nil || value.Children[1] == nil {
+				return nil, fmt.Errorf("ldap: failed to decode control: malformed paging control value")
+			}
 			value.Children[0].Description = "Paging Size"
 			value.Children[1].Description = "Cookie"
-			c.PagingSize = uint32(value.Children[0].Value.(int64))
+			pagingSize, ok := value.Children[0].Value.(int64)
+			if !ok || pagingSize < 0 || pagingSize > int64(^uint32(0)) {
+				return nil, fmt.Errorf("ldap: failed to decode control: malformed paging control size")
+			}
+			c.PagingSize = uint32(pagingSize)
 			c.Cookie = value.Children[1].Data.Bytes()
 			value.Children[1].Value = c.Cookie
-			return c
+			return c, nil
 		}
-		c.ControlValue = value.Value.(string)
+		controlValue, ok := value.Value.(string)
+		if !ok {
+			return nil, fmt.Errorf("ldap: failed to decode control: malformed control value")
+		}
+		c.ControlValue = controlValue
 	}
-	return c
+	return c, nil
 }
 
 func NewControlString(controlType string, criticality bool, controlValue string) *ControlString {
