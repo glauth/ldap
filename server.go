@@ -222,6 +222,13 @@ func (server *Server) Close() {
 }
 
 func (server *Server) handleConnection(conn net.Conn) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("ldap: (THIS SHOULD NEVER HAPPEN, PLEASE REPORT) panic in handler from %s: %v", conn.RemoteAddr(), r)
+		}
+		conn.Close()
+	}()
+
 	boundDN := "" // "" == anonymous
 
 handler:
@@ -335,7 +342,7 @@ handler:
 		case ApplicationExtendedRequest:
 			var tlsConn *tls.Conn
 			if n := len(req.Children); n == 1 || n == 2 {
-				if name := ber.DecodeString(req.Children[0].Data.Bytes()); name == oidStartTLS {
+				if name := ber.DecodeString(req.Children[0].Data.Bytes()); name == oidStartTLS && server.TLSConfig != nil {
 					tlsConn = tls.Server(conn, server.TLSConfig)
 				}
 			}
