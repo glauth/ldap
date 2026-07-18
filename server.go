@@ -222,6 +222,13 @@ func (server *Server) Close() {
 }
 
 func (server *Server) handleConnection(conn net.Conn) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("ldap: (THIS SHOULD NEVER HAPPEN, PLEASE REPORT) panic in handler from %s: %v", conn.RemoteAddr(), r)
+		}
+		conn.Close()
+	}()
+
 	boundDN := "" // "" == anonymous
 
 handler:
@@ -256,7 +263,18 @@ handler:
 		controls := []Control{}
 		if len(packet.Children) > 2 {
 			for _, child := range packet.Children[2].Children {
-				controls = append(controls, DecodeControl(child))
+				control, err := DecodeControl(child)
+				if err != nil {
+					log.Printf("DecodeControl error %s", err.Error())
+					responsePacket := encodeProtocolErrorResponse(messageID, req.Tag)
+					if responsePacket != nil {
+						if err = sendPacket(conn, responsePacket); err != nil {
+							log.Printf("sendPacket error %s", err.Error())
+						}
+					}
+					break handler
+				}
+				controls = append(controls, control)
 			}
 		}
 
@@ -399,6 +417,29 @@ func sendPacket(conn net.Conn, packet *ber.Packet) error {
 		return err
 	}
 	return nil
+}
+
+func encodeProtocolErrorResponse(messageID uint64, requestType ber.Tag) *ber.Packet {
+	switch requestType {
+	case ApplicationBindRequest:
+		return encodeBindResponse(messageID, LDAPResultProtocolError)
+	case ApplicationSearchRequest:
+		return encodeSearchDone(messageID, LDAPResultProtocolError)
+	case ApplicationModifyRequest:
+		return encodeLDAPResponse(messageID, ApplicationModifyResponse, LDAPResultProtocolError, LDAPResultCodeMap[LDAPResultProtocolError])
+	case ApplicationAddRequest:
+		return encodeLDAPResponse(messageID, ApplicationAddResponse, LDAPResultProtocolError, LDAPResultCodeMap[LDAPResultProtocolError])
+	case ApplicationDelRequest:
+		return encodeLDAPResponse(messageID, ApplicationDelResponse, LDAPResultProtocolError, LDAPResultCodeMap[LDAPResultProtocolError])
+	case ApplicationModifyDNRequest:
+		return encodeLDAPResponse(messageID, ApplicationModifyDNResponse, LDAPResultProtocolError, LDAPResultCodeMap[LDAPResultProtocolError])
+	case ApplicationCompareRequest:
+		return encodeLDAPResponse(messageID, ApplicationCompareResponse, LDAPResultProtocolError, LDAPResultCodeMap[LDAPResultProtocolError])
+	case ApplicationExtendedRequest:
+		return encodeLDAPResponse(messageID, ApplicationExtendedResponse, LDAPResultProtocolError, LDAPResultCodeMap[LDAPResultProtocolError])
+	default:
+		return nil
+	}
 }
 
 func routeFunc(dn string, funcNames []string) string {
