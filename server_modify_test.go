@@ -1,149 +1,176 @@
 package ldaps
 
 import (
+	"context"
+	"log"
 	"net"
 	"os/exec"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/go-ldap/ldap/v3"
 )
 
 func TestAdd(t *testing.T) {
-	done := make(chan bool)
 	s := NewServer()
 	s.BindFunc("", modifyTestHandler{})
 	s.AddFunc("", modifyTestHandler{})
-	go func() {
-		if err := s.ListenAndServe(listenString); err != nil {
-			t.Errorf("s.ListenAndServe failed: %s", err.Error())
-		}
-	}()
-	go func() {
-		cmd := exec.Command("ldapadd", "-v", "-H", ldapURL, "-x", "-f", "tests/add.ldif")
-		out, _ := cmd.CombinedOutput()
-		if !strings.Contains(string(out), "modify complete") {
-			t.Errorf("ldapadd failed: %v", string(out))
-		}
-		cmd = exec.Command("ldapadd", "-v", "-H", ldapURL, "-x", "-f", "tests/add2.ldif")
-		out, _ = cmd.CombinedOutput()
-		if !strings.Contains(string(out), "ldap_add: Insufficient access") {
-			t.Errorf("ldapadd should have failed: %v", string(out))
-		}
-		if strings.Contains(string(out), "modify complete") {
-			t.Errorf("ldapadd should have failed: %v", string(out))
-		}
-		done <- true
-	}()
-	select {
-	case <-done:
-	case <-time.After(timeout):
-		t.Errorf("ldapadd command timed out")
+	addr, err := ListenAndServe(t, s)
+	if err != nil {
+		t.Errorf("Failed to listen")
+		return
 	}
-	s.Close()
+	t.Cleanup(s.Close)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ldapadd", "-v", "-H", "ldap://"+addr.String(), "-x", "-f", "tests/add.ldif")
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ldapadd failed: error(%v): %s", err, out)
+	}
+	if !strings.Contains(string(out), "modify complete") {
+		t.Errorf("ldapadd failed: %s", out)
+	}
+}
+
+func TestAddFail(t *testing.T) {
+	previousOutput := log.Writer()
+	log.SetOutput(t.Output())
+
+	t.Cleanup(func() { log.SetOutput(previousOutput) })
+	s := NewServer()
+	s.BindFunc("", modifyTestHandler{})
+	s.AddFunc("", modifyTestHandler{})
+
+	addr, err := ListenAndServe(t, s)
+	if err != nil {
+		t.Errorf("Failed to listen")
+		return
+	}
+	t.Cleanup(s.Close)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ldapadd", "-v", "-H", "ldap://"+addr.String(), "-x", "-f", "tests/add2.ldif")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Errorf("ldapadd succeed. It shouldn't have: %s", out)
+	}
+	if !strings.Contains(string(out), "ldap_add: Insufficient access") {
+		t.Errorf("ldapadd should have failed: %s", out)
+	}
+	if strings.Contains(string(out), "modify complete") {
+		t.Errorf("ldapadd should have failed: %s", out)
+	}
 }
 
 func TestDelete(t *testing.T) {
-	done := make(chan bool)
 	s := NewServer()
 	s.BindFunc("", modifyTestHandler{})
 	s.DeleteFunc("", modifyTestHandler{})
-	go func() {
-		if err := s.ListenAndServe(listenString); err != nil {
-			t.Errorf("s.ListenAndServe failed: %s", err.Error())
-		}
-	}()
-	go func() {
-		cmd := exec.Command("ldapdelete", "-v", "-H", ldapURL, "-x", "cn=Delete Me,dc=example,dc=com")
-		out, _ := cmd.CombinedOutput()
-		if !strings.Contains(string(out), "Delete Result: Success (0)") || !strings.Contains(string(out), "Additional info: Success") {
-			t.Errorf("ldapdelete failed: %v", string(out))
-		}
-		cmd = exec.Command("ldapdelete", "-v", "-H", ldapURL, "-x", "cn=Bob,dc=example,dc=com")
-		out, _ = cmd.CombinedOutput()
-		if strings.Contains(string(out), "Success") || !strings.Contains(string(out), "ldap_delete: Insufficient access") {
-			t.Errorf("ldapdelete should have failed: %v", string(out))
-		}
-		done <- true
-	}()
-	select {
-	case <-done:
-	case <-time.After(timeout):
-		t.Errorf("ldapdelete command timed out")
+
+	addr, err := ListenAndServe(t, s)
+	if err != nil {
+		t.Errorf("Failed to listen")
+		return
 	}
-	s.Close()
+	t.Cleanup(s.Close)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ldapdelete", "-v", "-H", "ldap://"+addr.String(), "-x", "cn=Delete Me,dc=example,dc=com")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ldapdelete failed: error(%v): %s", err, out)
+	}
+	if cmd.ProcessState.ExitCode() != 0 {
+		t.Errorf("ldapdelete failed: %s", out)
+	}
+}
+
+func TestDeleteFail(t *testing.T) {
+	previousOutput := log.Writer()
+	log.SetOutput(t.Output())
+
+	t.Cleanup(func() { log.SetOutput(previousOutput) })
+	s := NewServer()
+	s.BindFunc("", modifyTestHandler{})
+	s.DeleteFunc("", modifyTestHandler{})
+
+	addr, err := ListenAndServe(t, s)
+	if err != nil {
+		t.Errorf("Failed to listen")
+		return
+	}
+	t.Cleanup(s.Close)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ldapdelete", "-v", "-H", "ldap://"+addr.String(), "-x", "cn=Bob,dc=example,dc=com")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Errorf("ldapdelete succeed. It shouldn't have: %s", out)
+	}
+	if strings.Contains(string(out), "Success") || !strings.Contains(string(out), "ldap_delete: Insufficient access") {
+		t.Errorf("ldapdelete should have failed: %s", out)
+	}
 }
 
 func TestModify(t *testing.T) {
-	done := make(chan bool)
 	s := NewServer()
 	s.BindFunc("", modifyTestHandler{})
 	s.ModifyFunc("", modifyTestHandler{})
-	go func() {
-		if err := s.ListenAndServe(listenString); err != nil {
-			t.Errorf("s.ListenAndServe failed: %s", err.Error())
-		}
-	}()
-	go func() {
-		cmd := exec.Command("ldapmodify", "-v", "-H", ldapURL, "-x", "-f", "tests/modify.ldif")
-		out, _ := cmd.CombinedOutput()
-		if !strings.Contains(string(out), "modify complete") {
-			t.Errorf("ldapmodify failed: %v", string(out))
-		}
-		cmd = exec.Command("ldapmodify", "-v", "-H", ldapURL, "-x", "-f", "tests/modify2.ldif")
-		out, _ = cmd.CombinedOutput()
-		if !strings.Contains(string(out), "ldap_modify: Insufficient access") || strings.Contains(string(out), "modify complete") {
-			t.Errorf("ldapmodify should have failed: %v", string(out))
-		}
-		done <- true
-	}()
-	select {
-	case <-done:
-	case <-time.After(timeout):
-		t.Errorf("ldapadd command timed out")
+
+	addr, err := ListenAndServe(t, s)
+	if err != nil {
+		t.Errorf("Failed to listen")
+		return
 	}
-	s.Close()
+	t.Cleanup(s.Close)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ldapmodify", "-v", "-H", "ldap://"+addr.String(), "-x", "-f", "tests/modify.ldif")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ldapmodify failed: error(%v): %s", err, out) // TODO:
+	}
+	if !strings.Contains(string(out), "modify complete") {
+		t.Errorf("ldapmodify failed: %s", out)
+		return
+	}
 }
 
-/*
-func TestModifyDN(t *testing.T) {
-	quit := make(chan bool)
-	done := make(chan bool)
-	go func() {
-		s := NewServer()
-		s.QuitChannel(quit)
-		s.BindFunc("", modifyTestHandler{})
-		s.AddFunc("", modifyTestHandler{})
-		if err := s.ListenAndServe(listenString); err != nil {
-			t.Errorf("s.ListenAndServe failed: %s", err.Error())
-		}
-	}()
-	go func() {
-		cmd := exec.Command("ldapadd", "-v", "-H", ldapURL, "-x", "-f", "tests/add.ldif")
-		//ldapmodrdn -H ldap://localhost:3389 -x "uid=babs,dc=example,dc=com" "uid=babsy,dc=example,dc=com"
-		out, _ := cmd.CombinedOutput()
-		if !strings.Contains(string(out), "modify complete") {
-			t.Errorf("ldapadd failed: %v", string(out))
-		}
-		cmd = exec.Command("ldapadd", "-v", "-H", ldapURL, "-x", "-f", "tests/add2.ldif")
-		out, _ = cmd.CombinedOutput()
-		if !strings.Contains(string(out), "ldap_add: Insufficient access") {
-			t.Errorf("ldapadd should have failed: %v", string(out))
-		}
-		if strings.Contains(string(out), "modify complete") {
-			t.Errorf("ldapadd should have failed: %v", string(out))
-		}
-		done <- true
-	}()
-	select {
-	case <-done:
-	case <-time.After(timeout):
-		t.Errorf("ldapadd command timed out")
+func TestModifyFail(t *testing.T) {
+	previousOutput := log.Writer()
+	log.SetOutput(t.Output())
+
+	t.Cleanup(func() { log.SetOutput(previousOutput) })
+	s := NewServer()
+	s.BindFunc("", modifyTestHandler{})
+	s.ModifyFunc("", modifyTestHandler{})
+
+	addr, err := ListenAndServe(t, s)
+	if err != nil {
+		t.Errorf("Failed to listen")
+		return
 	}
-	quit <- true
+	t.Cleanup(s.Close)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ldapmodify", "-v", "-H", "ldap://"+addr.String(), "-x", "-f", "tests/modify2.ldif")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Errorf("ldapmodify succeed. It shouldn't have: %s", out)
+	}
+	if !strings.Contains(string(out), "ldap_modify: Insufficient access") || strings.Contains(string(out), "modify complete") {
+		t.Errorf("ldapmodify should have failed: %s", out)
+		return
+	}
 }
-*/
 
 type modifyTestHandler struct {
 }
