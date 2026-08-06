@@ -91,7 +91,7 @@ func HandleSearchRequest(req *ber.Packet, controls *[]ldap.Control, messageID ui
 		}
 
 		// respond
-		responsePacket := encodeSearchResponse(messageID, searchReq, entry)
+		responsePacket := encodeSearchResponse(messageID, entry)
 		if err = sendPacket(conn, responsePacket); err != nil {
 			return ldap.NewError(ldap.LDAPResultOperationsError, err)
 		}
@@ -213,7 +213,7 @@ func filterAttributes(entry *ldap.Entry, attributes []string) (*ldap.Entry, erro
 	return entry, nil
 }
 
-func encodeSearchResponse(messageID uint64, req ldap.SearchRequest, res *ldap.Entry) *ber.Packet {
+func encodeSearchResponse(messageID uint64, res *ldap.Entry) *ber.Packet {
 	responsePacket := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "LDAP Response")
 	responsePacket.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, messageID, "Message ID"))
 
@@ -243,27 +243,4 @@ func encodeSearchAttribute(name string, values []string) *ber.Packet {
 	packet.AppendChild(valuesPacket)
 
 	return packet
-}
-
-func encodeSearchDone(messageID uint64, ldapResultCode uint16) *ber.Packet {
-	responsePacket := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "LDAP Response")
-	responsePacket.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, messageID, "Message ID"))
-	donePacket := ber.Encode(ber.ClassApplication, ber.TypeConstructed, ldap.ApplicationSearchResultDone, nil, "Search result done")
-	donePacket.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagEnumerated, uint64(ldapResultCode), "resultCode: "))
-	donePacket.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, "", "matchedDN: "))
-	donePacket.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, "", "errorMessage: "))
-	responsePacket.AppendChild(donePacket)
-
-	return responsePacket
-}
-
-func encodeSearchDoneWithControls(messageID uint64, ldapResultCode uint16, controls []ldap.Control) *ber.Packet {
-	responsePacket := encodeSearchDone(messageID, ldapResultCode)
-	controlPacket := ber.Encode(ber.ClassContext, ber.TypeConstructed, 0, nil, "Controls")
-	for _, control := range controls {
-		controlPacket.AppendChild(control.Encode())
-	}
-	responsePacket.AppendChild(controlPacket)
-
-	return responsePacket
 }
