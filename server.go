@@ -66,20 +66,23 @@ type Server struct {
 	CloseFns    map[string]Closer
 	Quit        chan bool
 	EnforceLDAP bool
-	Stats       *Stats
+	stats       *stats
 
 	// If set, server will accept StartTLS.
 	TLSConfig *tls.Config
 }
 
 type Stats struct {
-	Conns      int
-	Binds      int
-	Unbinds    int
-	Searches   int
-	statsMutex sync.Mutex
+	Conns    int
+	Binds    int
+	Unbinds  int
+	Searches int
 }
 
+type stats struct {
+	Stats
+	statsMutex sync.Mutex
+}
 type ServerSearchResult struct {
 	Entries    []*ldap.Entry
 	Referrals  []string
@@ -114,42 +117,54 @@ func NewServer() *Server {
 	s.ExtendedFunc("", d)
 	s.UnbindFunc("", d)
 	s.CloseFunc("", d)
-	s.Stats = nil
+	s.stats = nil
 	return s
 }
+
 func (server *Server) BindFunc(baseDN string, f Binder) {
 	server.BindFns[baseDN] = f
 }
+
 func (server *Server) SearchFunc(baseDN string, f Searcher) {
 	server.SearchFns[baseDN] = f
 }
+
 func (server *Server) AddFunc(baseDN string, f Adder) {
 	server.AddFns[baseDN] = f
 }
+
 func (server *Server) ModifyFunc(baseDN string, f Modifier) {
 	server.ModifyFns[baseDN] = f
 }
+
 func (server *Server) DeleteFunc(baseDN string, f Deleter) {
 	server.DeleteFns[baseDN] = f
 }
+
 func (server *Server) ModifyDNFunc(baseDN string, f ModifyDNr) {
 	server.ModifyDNFns[baseDN] = f
 }
+
 func (server *Server) CompareFunc(baseDN string, f Comparer) {
 	server.CompareFns[baseDN] = f
 }
+
 func (server *Server) AbandonFunc(baseDN string, f Abandoner) {
 	server.AbandonFns[baseDN] = f
 }
+
 func (server *Server) ExtendedFunc(baseDN string, f Extender) {
 	server.ExtendedFns[baseDN] = f
 }
+
 func (server *Server) UnbindFunc(baseDN string, f Unbinder) {
 	server.UnbindFns[baseDN] = f
 }
+
 func (server *Server) CloseFunc(baseDN string, f Closer) {
 	server.CloseFns[baseDN] = f
 }
+
 func (server *Server) QuitChannel(quit chan bool) {
 	server.Quit = quit
 }
@@ -170,18 +185,16 @@ func (server *Server) ListenAndServeTLS(listenString string, certFile string, ke
 
 func (server *Server) SetStats(enable bool) {
 	if enable {
-		server.Stats = &Stats{}
+		server.stats = &stats{}
 	} else {
-		server.Stats = nil
+		server.stats = nil
 	}
 }
 
 func (server *Server) GetStats() Stats {
-	defer func() {
-		server.Stats.statsMutex.Unlock()
-	}()
-	server.Stats.statsMutex.Lock()
-	return *server.Stats
+	defer server.stats.statsMutex.Unlock()
+	server.stats.statsMutex.Lock()
+	return server.stats.Stats
 }
 
 func (server *Server) ListenAndServe(listenString string) error {
@@ -211,7 +224,7 @@ listener:
 	for {
 		select {
 		case c := <-newConn:
-			server.Stats.countConns(1)
+			server.stats.countConns(1)
 			go server.handleConnection(c)
 		case <-server.Quit:
 			ln.Close()
@@ -285,8 +298,8 @@ handler:
 			}
 		}
 
-		//log.Printf("DEBUG: handling operation: %s [%d]", ApplicationMap[req.Tag], req.Tag)
-		//ber.PrintPacket(packet) // DEBUG
+		// log.Printf("DEBUG: handling operation: %s [%d]", ApplicationMap[req.Tag], req.Tag)
+		// ber.PrintPacket(packet) // DEBUG
 
 		// dispatch the LDAP operation
 		switch req.Tag { // ldap op code
@@ -300,7 +313,7 @@ handler:
 			break handler
 
 		case ldap.ApplicationBindRequest:
-			server.Stats.countBinds(1)
+			server.stats.countBinds(1)
 			ldapResultCode := HandleBindRequest(req, server.BindFns, conn)
 			if ldapResultCode == ldap.LDAPResultSuccess {
 				boundDN, ok = req.Children[1].Value.(string)
@@ -315,7 +328,7 @@ handler:
 				break handler
 			}
 		case ldap.ApplicationSearchRequest:
-			server.Stats.countSearches(1)
+			server.stats.countSearches(1)
 			if err := HandleSearchRequest(req, &controls, messageID, boundDN, server, conn); err != nil {
 				log.Printf("handleSearchRequest error %s", err.Error()) // TODO: make this more testable/better err handling - stop using log, stop using breaks?
 				e := err.(*ldap.Error)
@@ -345,7 +358,7 @@ handler:
 				}
 			}
 		case ldap.ApplicationUnbindRequest:
-			server.Stats.countUnbinds(1)
+			server.stats.countUnbinds(1)
 			break handler // simply disconnect
 		case ldap.ApplicationExtendedRequest:
 			var tlsConn *tls.Conn
@@ -483,66 +496,78 @@ func encodeLDAPResponse(messageID uint64, responseType uint8, ldapResultCode uin
 	return responsePacket
 }
 
-type defaultHandler struct {
-}
+type defaultHandler struct{}
 
 func (h defaultHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
 	return ldap.LDAPResultInvalidCredentials, nil
 }
+
 func (h defaultHandler) Search(boundDN string, req ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
 	return ServerSearchResult{make([]*ldap.Entry, 0), []string{}, []ldap.Control{}, ldap.LDAPResultSuccess}, nil
 }
+
 func (h defaultHandler) Add(boundDN string, req ldap.AddRequest, conn net.Conn) (uint16, error) {
 	return ldap.LDAPResultInsufficientAccessRights, nil
 }
+
 func (h defaultHandler) Modify(boundDN string, req ldap.ModifyRequest, conn net.Conn) (uint16, error) {
 	return ldap.LDAPResultInsufficientAccessRights, nil
 }
+
 func (h defaultHandler) Delete(boundDN, deleteDN string, conn net.Conn) (uint16, error) {
 	return ldap.LDAPResultInsufficientAccessRights, nil
 }
+
 func (h defaultHandler) ModifyDN(boundDN string, req ldap.ModifyDNRequest, conn net.Conn) (uint16, error) {
 	return ldap.LDAPResultInsufficientAccessRights, nil
 }
+
 func (h defaultHandler) Compare(boundDN string, req ldap.CompareRequest, conn net.Conn) (uint16, error) {
 	return ldap.LDAPResultInsufficientAccessRights, nil
 }
+
 func (h defaultHandler) Abandon(boundDN string, conn net.Conn) error {
 	return nil
 }
+
 func (h defaultHandler) Extended(boundDN string, req ldap.ExtendedRequest, conn net.Conn) (uint16, error) {
 	return ldap.LDAPResultProtocolError, nil
 }
+
 func (h defaultHandler) Unbind(boundDN string, conn net.Conn) (uint16, error) {
 	return ldap.LDAPResultSuccess, nil
 }
+
 func (h defaultHandler) Close(boundDN string, conn net.Conn) error {
 	conn.Close()
 	return nil
 }
 
-func (stats *Stats) countConns(delta int) {
+func (stats *stats) countConns(delta int) {
 	if stats != nil {
 		stats.statsMutex.Lock()
 		stats.Conns += delta
 		stats.statsMutex.Unlock()
 	}
 }
-func (stats *Stats) countBinds(delta int) {
+
+func (stats *stats) countBinds(delta int) {
 	if stats != nil {
 		stats.statsMutex.Lock()
 		stats.Binds += delta
 		stats.statsMutex.Unlock()
 	}
 }
-func (stats *Stats) countUnbinds(delta int) {
+
+func (stats *stats) countUnbinds(delta int) {
 	if stats != nil {
 		stats.statsMutex.Lock()
 		stats.Unbinds += delta
 		stats.statsMutex.Unlock()
 	}
 }
-func (stats *Stats) countSearches(delta int) {
+
+func (stats *stats) countSearches(delta int) {
 	if stats != nil {
 		stats.statsMutex.Lock()
 		stats.Searches += delta
