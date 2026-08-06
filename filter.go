@@ -13,11 +13,10 @@ import (
 )
 
 func ServerApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
-	switch ldap.FilterMap[uint64(f.Tag)] {
+	switch f.Tag {
 	default:
-		//log.Fatalf("Unknown LDAP filter code: %d", f.Tag)
 		return false, ldap.LDAPResultOperationsError
-	case "Equality Match":
+	case ldap.FilterEqualityMatch:
 		if len(f.Children) != 2 {
 			return false, ldap.LDAPResultOperationsError
 		}
@@ -45,13 +44,13 @@ func ServerApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 				}
 			}
 		}
-	case "Present":
+	case ldap.FilterPresent:
 		for _, a := range entry.Attributes {
 			if strings.EqualFold(a.Name, f.Data.String()) {
 				return true, ldap.LDAPResultSuccess
 			}
 		}
-	case "And":
+	case ldap.FilterAnd:
 		for _, child := range f.Children {
 			ok, exitCode := ServerApplyFilter(child, entry)
 			if exitCode != ldap.LDAPResultSuccess {
@@ -62,7 +61,7 @@ func ServerApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 			}
 		}
 		return true, ldap.LDAPResultSuccess
-	case "Or":
+	case ldap.FilterOr:
 		anyOk := false
 		for _, child := range f.Children {
 			ok, exitCode := ServerApplyFilter(child, entry)
@@ -75,7 +74,7 @@ func ServerApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 		if anyOk {
 			return true, ldap.LDAPResultSuccess
 		}
-	case "Not":
+	case ldap.FilterNot:
 		if len(f.Children) != 1 {
 			return false, ldap.LDAPResultOperationsError
 		}
@@ -85,7 +84,7 @@ func ServerApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 		} else if !ok {
 			return true, ldap.LDAPResultSuccess
 		}
-	case "Substrings":
+	case ldap.FilterSubstrings:
 		if len(f.Children) != 2 {
 			return false, ldap.LDAPResultOperationsError
 		}
@@ -116,13 +115,13 @@ func ServerApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 				}
 			}
 		}
-	case "Greater Or Equal": // TODO
+	case ldap.FilterGreaterOrEqual: // TODO
 		return false, ldap.LDAPResultOperationsError
-	case "Less Or Equal": // TODO
+	case ldap.FilterLessOrEqual: // TODO
 		return false, ldap.LDAPResultOperationsError
-	case "Approx Match": // TODO
+	case ldap.FilterApproxMatch: // TODO
 		return false, ldap.LDAPResultOperationsError
-	case "Extensible Match":
+	case ldap.FilterExtensibleMatch:
 		// We don't implement extensible matching server-side; defer to backend results.
 		return true, ldap.LDAPResultSuccess
 	}
@@ -139,8 +138,8 @@ func GetFilterAttribute(filter string, attr string) (string, error) {
 }
 func parseFilterAttribute(f *ber.Packet, attr string) (string, error) {
 	objectClass := ""
-	switch ldap.FilterMap[uint64(f.Tag)] {
-	case "Equality Match":
+	switch f.Tag {
+	case ldap.FilterEqualityMatch:
 		if len(f.Children) != 2 {
 			return "", ldap.NewError(ldap.LDAPResultProtocolError, errors.New("equality match must have only two children"))
 		}
@@ -161,7 +160,7 @@ func parseFilterAttribute(f *ber.Packet, attr string) (string, error) {
 		if strings.EqualFold(attribute, attr) {
 			objectClass = value
 		}
-	case "And":
+	case ldap.FilterAnd:
 		for _, child := range f.Children {
 			subType, err := parseFilterAttribute(child, attr)
 			if err != nil {
@@ -171,7 +170,7 @@ func parseFilterAttribute(f *ber.Packet, attr string) (string, error) {
 				objectClass = subType
 			}
 		}
-	case "Or":
+	case ldap.FilterOr:
 		for _, child := range f.Children {
 			subType, err := parseFilterAttribute(child, attr)
 			if err != nil {
@@ -181,7 +180,7 @@ func parseFilterAttribute(f *ber.Packet, attr string) (string, error) {
 				objectClass = subType
 			}
 		}
-	case "Not":
+	case ldap.FilterNot:
 		if len(f.Children) != 1 {
 			return "", ldap.NewError(ldap.LDAPResultProtocolError, errors.New("not filter must have only one child"))
 		}
