@@ -343,10 +343,10 @@ handler:
 					break handler
 				}
 				break handler
-			} else {
-				supportedControls := false
-				for _, control := range controls {
-					if control.GetControlType() == ldap.ControlTypePaging {
+			}
+			supportedControls := false
+			for _, control := range controls {
+				if control.GetControlType() == ldap.ControlTypePaging {
 						supportedControls = true
 						break
 					}
@@ -359,8 +359,7 @@ handler:
 				} else {
 					if err = sendPacket(conn, encodeSearchDone(messageID, ldap.LDAPResultSuccess)); err != nil {
 						log.Printf("sendPacket error %v", err)
-						break handler
-					}
+					break handler
 				}
 			}
 		case ldap.ApplicationUnbindRequest:

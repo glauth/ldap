@@ -48,10 +48,9 @@ func HandleBindRequest(req *ber.Packet, fns map[string]Binder, conn net.Conn) (r
 				return ldap.LDAPResultOperationsError
 			}
 			return resultCode
-		} else {
-			log.Print("Simple bind request has wrong # children.  len(req.Children) != 3")
-			return ldap.LDAPResultInappropriateAuthentication
 		}
+		log.Print("Simple bind request has wrong # children.  len(req.Children) != 3")
+		return ldap.LDAPResultInappropriateAuthentication
 	case LDAPBindAuthSASL:
 		log.Print("SASL authentication is not supported")
 		return ldap.LDAPResultInappropriateAuthentication
