@@ -150,3 +150,50 @@ func TestGetFilterAttribute(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyFilter(t *testing.T) {
+	for _, testInfo := range []struct {
+		Filter   string
+		Entry    *ldap.Entry
+		Expected bool
+	}{
+		{
+			Filter:   "(objectClass=*)",
+			Entry:    ldap.NewEntry("cn=test,ou=users,dc=example,dc=org", map[string][]string{"objectclass": {"User"}}),
+			Expected: true,
+		},
+		{
+			Filter: "(memberOf=cn=*sers,ou=groups,dc=example,dc=org)",
+			Entry: ldap.NewEntry(
+				"cn=test,ou=users,dc=example,dc=org",
+				map[string][]string{
+					"objectclass": {"User"},
+					"memberOf":    {"cn=users,ou=groups,dc=example,dc=org"},
+				}),
+			Expected: true,
+		},
+		{
+			Filter: "(memberOf=cn=*sers,ou=groups,dc=example,dc=org)",
+			Entry: ldap.NewEntry(
+				"cn=test,ou=users,dc=example,dc=org",
+				map[string][]string{
+					"objectclass": {"User"},
+					"memberOf":    {"cn=admins,ou=groups,dc=example,dc=org"},
+				}),
+			Expected: false,
+		},
+	} {
+		berFilter, err := ldap.CompileFilter(testInfo.Filter)
+		if err != nil {
+			t.Errorf("Compiling the filter failed: %v", err)
+		}
+		matched, ldapResult := ServerApplyFilter(berFilter, testInfo.Entry)
+		if matched != testInfo.Expected {
+			status := "did not match"
+			if matched {
+				status = "matched"
+			}
+			t.Errorf("Entry: %v %s: %q return code: %s", testInfo.Entry, status, testInfo.Filter, ldap.LDAPResultCodeMap[ldapResult])
+		}
+	}
+}

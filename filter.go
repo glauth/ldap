@@ -102,27 +102,40 @@ func ServerApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 		if !ok {
 			return false, ldap.LDAPResultProtocolError
 		}
-		valueBytes := f.Children[1].Children[0].Data.Bytes()
-		valueLower := strings.ToLower(string(valueBytes[:]))
+		var attr *ldap.EntryAttribute
 		for _, a := range entry.Attributes {
 			if strings.EqualFold(a.Name, attribute) {
-				for _, v := range a.Values {
-					vLower := strings.ToLower(v)
-					switch f.Children[1].Children[0].Tag {
-					case ldap.FilterSubstringsInitial:
-						if strings.HasPrefix(vLower, valueLower) {
-							return true, ldap.LDAPResultSuccess
-						}
-					case ldap.FilterSubstringsAny:
-						if strings.Contains(vLower, valueLower) {
-							return true, ldap.LDAPResultSuccess
-						}
-					case ldap.FilterSubstringsFinal:
-						if strings.HasSuffix(vLower, valueLower) {
-							return true, ldap.LDAPResultSuccess
-						}
-					}
+				attr = a
+
+				break
+			}
+		}
+		if attr == nil {
+			break
+		}
+
+	valueLoop:
+		for _, v := range attr.Values { // Check each value to see if it matches. Used for memberOf searches
+			value := strings.ToLower(v)
+			matched := false
+
+			for _, s := range f.Children[1].Children { // Check each part of the filter ('beg' and 'end' in 'beg*end'). This can't end early because if we are checking group membership the group may not be the first listed group
+				search := strings.ToLower(s.Data.String())
+
+				switch s.Tag {
+				case ldap.FilterSubstringsInitial:
+					matched = strings.HasPrefix(value, search)
+				case ldap.FilterSubstringsAny:
+					matched = strings.Contains(value, search)
+				case ldap.FilterSubstringsFinal:
+					matched = strings.HasSuffix(value, search)
+				default:
+					continue valueLoop
 				}
+			}
+
+			if matched {
+				return true, ldap.LDAPResultSuccess
 			}
 		}
 	case ldap.FilterGreaterOrEqual: // TODO
