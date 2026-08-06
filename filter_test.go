@@ -34,13 +34,13 @@ func TestFilter(t *testing.T) {
 	for _, i := range testFilters {
 		filter, err := ldap.CompileFilter(i.filterStr)
 		if err != nil {
-			t.Errorf("Problem compiling %s - %s", i.filterStr, err.Error())
+			t.Errorf("Problem compiling %s - %v", i.filterStr, err)
 		} else if filter.Tag != i.filterType {
 			t.Errorf("%q Expected %q got %q", i.filterStr, ldap.FilterMap[uint64(i.filterType)], ldap.FilterMap[uint64(filter.Tag)])
 		} else {
 			o, err := ldap.DecompileFilter(filter)
 			if err != nil {
-				t.Errorf("Problem compiling %s - %s", i.filterStr, err.Error())
+				t.Errorf("Problem compiling %s - %v", i.filterStr, err)
 			} else if i.filterStr != o {
 				t.Errorf("%q expected, got %q", i.filterStr, o)
 			}

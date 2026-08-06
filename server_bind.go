@@ -44,7 +44,7 @@ func HandleBindRequest(req *ber.Packet, fns map[string]Binder, conn net.Conn) (r
 			fn := routeFunc(bindDN, fnNames)
 			resultCode, err := fns[fn].Bind(bindDN, bindAuth.Data.String(), conn)
 			if err != nil {
-				log.Printf("BindFn Error %s", err.Error())
+				log.Printf("BindFn Error %v", err)
 				return ldap.LDAPResultOperationsError
 			}
 			return resultCode
