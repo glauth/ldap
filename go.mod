@@ -1,4 +1,4 @@
-module github.com/glauth/ldap
+module github.com/glauth/ldaps
 
 go 1.25.0
 
