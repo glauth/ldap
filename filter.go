@@ -158,13 +158,28 @@ func DecompileFilter(packet *ber.Packet) (ret string, err error) {
 	case FilterSubstrings:
 		ret += ber.DecodeString(packet.Children[0].Data.Bytes())
 		ret += "="
-		switch packet.Children[1].Children[0].Tag {
-		case FilterSubstringsInitial:
-			ret += ber.DecodeString(packet.Children[1].Children[0].Data.Bytes()) + "*"
-		case FilterSubstringsAny:
-			ret += "*" + ber.DecodeString(packet.Children[1].Children[0].Data.Bytes()) + "*"
-		case FilterSubstringsFinal:
-			ret += "*" + ber.DecodeString(packet.Children[1].Children[0].Data.Bytes())
+		// RFC 4511 4.5.1.7: a SubstringFilter holds at most one `initial`
+		// (first), any number of `any`, and at most one `final` (last).
+		// Reading only Children[1].Children[0] discarded every component after
+		// the first, so "(cn=svc-*-prod)" decompiled to "(cn=svc-*)" -- a
+		// strictly BROADER filter. A server that decompiles an incoming request
+		// to route it then answers a different question than the client asked.
+		for i, child := range packet.Children[1].Children {
+			value := ber.DecodeString(child.Data.Bytes())
+			switch child.Tag {
+			case FilterSubstringsInitial:
+				ret += value + "*"
+			case FilterSubstringsAny:
+				if i == 0 {
+					ret += "*"
+				}
+				ret += value + "*"
+			case FilterSubstringsFinal:
+				if i == 0 {
+					ret += "*"
+				}
+				ret += value
+			}
 		}
 	case FilterEqualityMatch:
 		ret += ber.DecodeString(packet.Children[0].Data.Bytes())
@@ -332,26 +347,38 @@ func compileFilter(filter string, pos int) (*ber.Packet, int, error) {
 		}
 		packet.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, attribute, "Attribute"))
 		switch {
-		case packet.Tag == FilterEqualityMatch && condition[0] == '*' && condition[len(condition)-1] == '*':
-			// Any
+		case packet.Tag == FilterEqualityMatch && strings.Contains(condition, "*"):
+			// RFC 4511 4.5.1.7. The three cases this replaced -- "*x*", "*x"
+			// and "x*" -- covered only single-component patterns. Anything with
+			// an interior '*' ("a*b*c", "svc-*-prod") matched none of them and
+			// fell through to `default`, where it was encoded as an equality
+			// match whose value contained a literal '*'. No entry has a literal
+			// '*' in its value, so those filters silently matched nothing.
+			// Splitting on '*' encodes each component as initial / any / final.
 			packet.Tag = FilterSubstrings
 			packet.Description = FilterMap[packet.Tag]
 			seq := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "Substrings")
-			seq.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, FilterSubstringsAny, condition[1:len(condition)-1], "Any Substring"))
-			packet.AppendChild(seq)
-		case packet.Tag == FilterEqualityMatch && condition[0] == '*':
-			// Final
-			packet.Tag = FilterSubstrings
-			packet.Description = FilterMap[packet.Tag]
-			seq := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "Substrings")
-			seq.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, FilterSubstringsFinal, condition[1:], "Final Substring"))
-			packet.AppendChild(seq)
-		case packet.Tag == FilterEqualityMatch && condition[len(condition)-1] == '*':
-			// Initial
-			packet.Tag = FilterSubstrings
-			packet.Description = FilterMap[packet.Tag]
-			seq := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "Substrings")
-			seq.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, FilterSubstringsInitial, condition[:len(condition)-1], "Initial Substring"))
+			parts := strings.Split(condition, "*")
+			for i, part := range parts {
+				if part == "" {
+					continue
+				}
+				switch {
+				case i == 0:
+					seq.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, FilterSubstringsInitial, part, "Initial Substring"))
+				case i == len(parts)-1:
+					seq.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, FilterSubstringsFinal, part, "Final Substring"))
+				default:
+					seq.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, FilterSubstringsAny, part, "Any Substring"))
+				}
+			}
+			if len(seq.Children) == 0 {
+				// A condition of only asterisks, e.g. "**". The previous form
+				// encoded a single empty `any`, which matches every value;
+				// preserved here rather than emitting an empty substrings
+				// sequence, which RFC 4511 forbids.
+				seq.AppendChild(ber.NewString(ber.ClassContext, ber.TypePrimitive, FilterSubstringsAny, "", "Any Substring"))
+			}
 			packet.AppendChild(seq)
 		default:
 			packet.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, condition, "Condition"))
@@ -431,25 +458,15 @@ func ServerApplyFilter(f *ber.Packet, entry *Entry) (bool, LDAPResultCode) {
 			return false, LDAPResultOperationsError
 		}
 		attribute := f.Children[0].Value.(string)
-		valueBytes := f.Children[1].Children[0].Data.Bytes()
-		valueLower := strings.ToLower(string(valueBytes[:]))
+		// Testing only Children[1].Children[0] meant a multi-component
+		// assertion was satisfied by its FIRST component alone, so
+		// "(cn=svc-*-prod)" matched "svc-door-dev". Every component is matched
+		// below, in order and without overlap.
 		for _, a := range entry.Attributes {
 			if strings.EqualFold(a.Name, attribute) {
 				for _, v := range a.Values {
-					vLower := strings.ToLower(v)
-					switch f.Children[1].Children[0].Tag {
-					case FilterSubstringsInitial:
-						if strings.HasPrefix(vLower, valueLower) {
-							return true, LDAPResultSuccess
-						}
-					case FilterSubstringsAny:
-						if strings.Contains(vLower, valueLower) {
-							return true, LDAPResultSuccess
-						}
-					case FilterSubstringsFinal:
-						if strings.HasSuffix(vLower, valueLower) {
-							return true, LDAPResultSuccess
-						}
+					if substringAssertionMatches(f.Children[1].Children, v) {
+						return true, LDAPResultSuccess
 					}
 				}
 			}
@@ -521,4 +538,34 @@ func parseFilterObjectClass(f *ber.Packet) (string, error) {
 
 	}
 	return strings.ToLower(objectClass), nil
+}
+
+// substringAssertionMatches reports whether value satisfies every component of
+// an RFC 4511 SubstringFilter. Components match in order and may not overlap:
+// `initial` anchors the head, each `any` must appear after the previously
+// consumed text, and `final` anchors the tail.
+func substringAssertionMatches(components []*ber.Packet, value string) bool {
+	rest := strings.ToLower(value)
+	for _, component := range components {
+		part := strings.ToLower(ber.DecodeString(component.Data.Bytes()))
+		switch component.Tag {
+		case FilterSubstringsInitial:
+			if !strings.HasPrefix(rest, part) {
+				return false
+			}
+			rest = rest[len(part):]
+		case FilterSubstringsAny:
+			idx := strings.Index(rest, part)
+			if idx < 0 {
+				return false
+			}
+			rest = rest[idx+len(part):]
+		case FilterSubstringsFinal:
+			if !strings.HasSuffix(rest, part) {
+				return false
+			}
+			rest = ""
+		}
+	}
+	return true
 }
