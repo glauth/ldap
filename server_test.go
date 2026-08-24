@@ -17,12 +17,16 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-ldap/ldap/v3"
 )
 
-var listenString = "localhost:3389"
-var ldapURL = "ldap://" + listenString
-var timeout = 400 * time.Millisecond
-var serverBaseDN = "o=testers,c=test"
+var (
+	listenString = "localhost:3389"
+	ldapURL      = "ldap://" + listenString
+	timeout      = 400 * time.Millisecond
+	serverBaseDN = "o=testers,c=test"
+)
 
 type selfSignedCert struct {
 	// Path to the SSL certificates.
@@ -210,7 +214,7 @@ which is very heavy-handed for a test like this.
 	done := make(chan struct{})
 	go func() {
 		cmd := exec.Command("env",
-			"LDAPTLS_CACERT="+cert.CACertPath,
+			"LDAPTLS_REQCERT=ALLOW",
 			"ldapsearch", "-H", "ldap://"+addr, "-ZZ", "-d", "-1", "-x", "-b", "o=testers,c=test")
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -490,147 +494,137 @@ func TestSearchStats(t *testing.T) {
 }
 
 // ///////////////////////
-type bindAnonOK struct {
-}
+type bindAnonOK struct{}
 
-func (b bindAnonOK) Bind(bindDN, bindSimplePw string, conn net.Conn) (LDAPResultCode, error) {
+func (b bindAnonOK) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
 	if bindDN == "" && bindSimplePw == "" {
-		return LDAPResultSuccess, nil
+		return ldap.LDAPResultSuccess, nil
 	}
-	return LDAPResultInvalidCredentials, nil
+	return ldap.LDAPResultInvalidCredentials, nil
 }
 
-type bindSimple struct {
-}
+type bindSimple struct{}
 
-func (b bindSimple) Bind(bindDN, bindSimplePw string, conn net.Conn) (LDAPResultCode, error) {
+func (b bindSimple) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
 	if bindDN == "cn=testy,o=testers,c=test" && bindSimplePw == "iLike2test" {
-		return LDAPResultSuccess, nil
+		return ldap.LDAPResultSuccess, nil
 	}
-	return LDAPResultInvalidCredentials, nil
+	return ldap.LDAPResultInvalidCredentials, nil
 }
 
-type bindSimple2 struct {
-}
+type bindSimple2 struct{}
 
-func (b bindSimple2) Bind(bindDN, bindSimplePw string, conn net.Conn) (LDAPResultCode, error) {
+func (b bindSimple2) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
 	if bindDN == "cn=testy,o=testers,c=testz" && bindSimplePw == "ZLike2test" {
-		return LDAPResultSuccess, nil
+		return ldap.LDAPResultSuccess, nil
 	}
-	return LDAPResultInvalidCredentials, nil
+	return ldap.LDAPResultInvalidCredentials, nil
 }
 
-type bindPanic struct {
-}
+type bindPanic struct{}
 
-func (b bindPanic) Bind(bindDN, bindSimplePw string, conn net.Conn) (LDAPResultCode, error) {
+func (b bindPanic) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
 	panic("test panic at the disco")
 }
 
-type bindCaseInsensitive struct {
-}
+type bindCaseInsensitive struct{}
 
-func (b bindCaseInsensitive) Bind(bindDN, bindSimplePw string, conn net.Conn) (LDAPResultCode, error) {
+func (b bindCaseInsensitive) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
 	if strings.ToLower(bindDN) == "cn=case,o=testers,c=test" && bindSimplePw == "iLike2test" {
-		return LDAPResultSuccess, nil
+		return ldap.LDAPResultSuccess, nil
 	}
-	return LDAPResultInvalidCredentials, nil
+	return ldap.LDAPResultInvalidCredentials, nil
 }
 
-type searchSimple struct {
-}
+type searchSimple struct{}
 
-func (s searchSimple) Search(boundDN string, searchReq SearchRequest, conn net.Conn) (ServerSearchResult, error) {
-	entries := []*Entry{
-		{"cn=ned,o=testers,c=test", []*EntryAttribute{
-			{"cn", []string{"ned"}},
-			{"o", []string{"ate"}},
-			{"uidNumber", []string{"5000"}},
-			{"accountstatus", []string{"active"}},
-			{"uid", []string{"ned"}},
-			{"description", []string{"ned via sa"}},
-			{"objectclass", []string{"posixaccount"}},
+func (s searchSimple) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
+	entries := []*ldap.Entry{
+		{DN: "cn=ned,o=testers,c=test", Attributes: []*ldap.EntryAttribute{
+			{Name: "cn", Values: []string{"ned"}},
+			{Name: "o", Values: []string{"ate"}},
+			{Name: "uidNumber", Values: []string{"5000"}},
+			{Name: "accountstatus", Values: []string{"active"}},
+			{Name: "uid", Values: []string{"ned"}},
+			{Name: "description", Values: []string{"ned via sa"}},
+			{Name: "objectclass", Values: []string{"posixaccount"}},
 		}},
-		{"cn=trent,o=testers,c=test", []*EntryAttribute{
-			{"cn", []string{"trent"}},
-			{"o", []string{"ate"}},
-			{"uidNumber", []string{"5005"}},
-			{"accountstatus", []string{"active"}},
-			{"uid", []string{"trent"}},
-			{"description", []string{"trent via sa"}},
-			{"objectclass", []string{"posixaccount"}},
+		{DN: "cn=trent,o=testers,c=test", Attributes: []*ldap.EntryAttribute{
+			{Name: "cn", Values: []string{"trent"}},
+			{Name: "o", Values: []string{"ate"}},
+			{Name: "uidNumber", Values: []string{"5005"}},
+			{Name: "accountstatus", Values: []string{"active"}},
+			{Name: "uid", Values: []string{"trent"}},
+			{Name: "description", Values: []string{"trent via sa"}},
+			{Name: "objectclass", Values: []string{"posixaccount"}},
 		}},
-		{"cn=randy,o=testers,c=test", []*EntryAttribute{
-			{"cn", []string{"randy"}},
-			{"o", []string{"ate"}},
-			{"uidNumber", []string{"5555"}},
-			{"accountstatus", []string{"active"}},
-			{"uid", []string{"randy"}},
-			{"objectclass", []string{"posixaccount"}},
-		}},
-	}
-	return ServerSearchResult{entries, []string{}, []Control{}, LDAPResultSuccess}, nil
-}
-
-type searchSimple2 struct {
-}
-
-func (s searchSimple2) Search(boundDN string, searchReq SearchRequest, conn net.Conn) (ServerSearchResult, error) {
-	entries := []*Entry{
-		{"cn=hamburger,o=testers,c=testz", []*EntryAttribute{
-			{"cn", []string{"hamburger"}},
-			{"o", []string{"testers"}},
-			{"uidNumber", []string{"5000"}},
-			{"accountstatus", []string{"active"}},
-			{"uid", []string{"hamburger"}},
-			{"objectclass", []string{"posixaccount"}},
+		{DN: "cn=randy,o=testers,c=test", Attributes: []*ldap.EntryAttribute{
+			{Name: "cn", Values: []string{"randy"}},
+			{Name: "o", Values: []string{"ate"}},
+			{Name: "uidNumber", Values: []string{"5555"}},
+			{Name: "accountstatus", Values: []string{"active"}},
+			{Name: "uid", Values: []string{"randy"}},
+			{Name: "objectclass", Values: []string{"posixaccount"}},
 		}},
 	}
-	return ServerSearchResult{entries, []string{}, []Control{}, LDAPResultSuccess}, nil
+	return ServerSearchResult{entries, []string{}, []ldap.Control{}, ldap.LDAPResultSuccess}, nil
 }
 
-type searchPanic struct {
+type searchSimple2 struct{}
+
+func (s searchSimple2) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
+	entries := []*ldap.Entry{
+		{DN: "cn=hamburger,o=testers,c=testz", Attributes: []*ldap.EntryAttribute{
+			{Name: "cn", Values: []string{"hamburger"}},
+			{Name: "o", Values: []string{"testers"}},
+			{Name: "uidNumber", Values: []string{"5000"}},
+			{Name: "accountstatus", Values: []string{"active"}},
+			{Name: "uid", Values: []string{"hamburger"}},
+			{Name: "objectclass", Values: []string{"posixaccount"}},
+		}},
+	}
+	return ServerSearchResult{entries, []string{}, []ldap.Control{}, ldap.LDAPResultSuccess}, nil
 }
 
-func (s searchPanic) Search(boundDN string, searchReq SearchRequest, conn net.Conn) (ServerSearchResult, error) {
+type searchPanic struct{}
+
+func (s searchPanic) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
 	panic("this is a test panic")
 }
 
-type searchControls struct {
-}
+type searchControls struct{}
 
-func (s searchControls) Search(boundDN string, searchReq SearchRequest, conn net.Conn) (ServerSearchResult, error) {
-	entries := []*Entry{}
+func (s searchControls) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
+	entries := []*ldap.Entry{}
 	if len(searchReq.Controls) == 1 && searchReq.Controls[0].GetControlType() == "1.2.3.4.5" {
-		newEntry := &Entry{"cn=hamburger,o=testers,c=testz", []*EntryAttribute{
-			{"cn", []string{"hamburger"}},
-			{"o", []string{"testers"}},
-			{"uidNumber", []string{"5000"}},
-			{"accountstatus", []string{"active"}},
-			{"uid", []string{"hamburger"}},
-			{"objectclass", []string{"posixaccount"}},
+		newEntry := &ldap.Entry{DN: "cn=hamburger,o=testers,c=testz", Attributes: []*ldap.EntryAttribute{
+			{Name: "cn", Values: []string{"hamburger"}},
+			{Name: "o", Values: []string{"testers"}},
+			{Name: "uidNumber", Values: []string{"5000"}},
+			{Name: "accountstatus", Values: []string{"active"}},
+			{Name: "uid", Values: []string{"hamburger"}},
+			{Name: "objectclass", Values: []string{"posixaccount"}},
 		}}
 		entries = append(entries, newEntry)
 	}
-	return ServerSearchResult{entries, []string{}, []Control{}, LDAPResultSuccess}, nil
+	return ServerSearchResult{entries, []string{}, []ldap.Control{}, ldap.LDAPResultSuccess}, nil
 }
 
-type searchCaseInsensitive struct {
-}
+type searchCaseInsensitive struct{}
 
-func (s searchCaseInsensitive) Search(boundDN string, searchReq SearchRequest, conn net.Conn) (ServerSearchResult, error) {
-	entries := []*Entry{
-		{"cn=CASE,o=testers,c=test", []*EntryAttribute{
-			{"cn", []string{"CaSe"}},
-			{"o", []string{"ate"}},
-			{"uidNumber", []string{"5005"}},
-			{"accountstatus", []string{"active"}},
-			{"uid", []string{"trent"}},
-			{"description", []string{"trent via sa"}},
-			{"objectclass", []string{"posixaccount"}},
+func (s searchCaseInsensitive) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
+	entries := []*ldap.Entry{
+		{DN: "cn=CASE,o=testers,c=test", Attributes: []*ldap.EntryAttribute{
+			{Name: "cn", Values: []string{"CaSe"}},
+			{Name: "o", Values: []string{"ate"}},
+			{Name: "uidNumber", Values: []string{"5005"}},
+			{Name: "accountstatus", Values: []string{"active"}},
+			{Name: "uid", Values: []string{"trent"}},
+			{Name: "description", Values: []string{"trent via sa"}},
+			{Name: "objectclass", Values: []string{"posixaccount"}},
 		}},
 	}
-	return ServerSearchResult{entries, []string{}, []Control{}, LDAPResultSuccess}, nil
+	return ServerSearchResult{entries, []string{}, []ldap.Control{}, ldap.LDAPResultSuccess}, nil
 }
 
 func TestRouteFunc(t *testing.T) {

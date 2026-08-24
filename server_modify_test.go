@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-ldap/ldap/v3"
 )
 
 func TestAdd(t *testing.T) {
@@ -146,37 +148,60 @@ func TestModifyDN(t *testing.T) {
 type modifyTestHandler struct {
 }
 
-func (h modifyTestHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (LDAPResultCode, error) {
+func (h modifyTestHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
 	if bindDN == "" && bindSimplePw == "" {
-		return LDAPResultSuccess, nil
+		return ldap.LDAPResultSuccess, nil
 	}
-	return LDAPResultInvalidCredentials, nil
+	return ldap.LDAPResultInvalidCredentials, nil
 }
-func (h modifyTestHandler) Add(boundDN string, req AddRequest, conn net.Conn) (LDAPResultCode, error) {
+func (h modifyTestHandler) Add(boundDN string, req ldap.AddRequest, conn net.Conn) (uint16, error) {
 	// only succeed on expected contents of add.ldif:
-	if len(req.attributes) == 5 && req.dn == "cn=Barbara Jensen,dc=example,dc=com" &&
-		req.attributes[2].attrType == "sn" && len(req.attributes[2].attrVals) == 1 &&
-		req.attributes[2].attrVals[0] == "Jensen" {
-		return LDAPResultSuccess, nil
+	if len(req.Attributes) == 5 && req.DN == "cn=Barbara Jensen,dc=example,dc=com" &&
+		req.Attributes[2].Type == "sn" && len(req.Attributes[2].Vals) == 1 &&
+		req.Attributes[2].Vals[0] == "Jensen" {
+		return ldap.LDAPResultSuccess, nil
 	}
-	return LDAPResultInsufficientAccessRights, nil
+	return ldap.LDAPResultInsufficientAccessRights, nil
 }
-func (h modifyTestHandler) Delete(boundDN, deleteDN string, conn net.Conn) (LDAPResultCode, error) {
+func (h modifyTestHandler) Delete(boundDN, deleteDN string, conn net.Conn) (uint16, error) {
 	// only succeed on expected deleteDN
 	if deleteDN == "cn=Delete Me,dc=example,dc=com" {
-		return LDAPResultSuccess, nil
+		return ldap.LDAPResultSuccess, nil
 	}
-	return LDAPResultInsufficientAccessRights, nil
+	return ldap.LDAPResultInsufficientAccessRights, nil
 }
-func (h modifyTestHandler) Modify(boundDN string, req ModifyRequest, conn net.Conn) (LDAPResultCode, error) {
+func extractChanges(req ldap.ModifyRequest) (deleteAttributes []ldap.Change, replaceAttributes []ldap.Change, addAttributes []ldap.Change, incrementAttributes []ldap.Change, otherAttributes []ldap.Change) {
+	for _, change := range req.Changes {
+		switch change.Operation {
+		case ldap.AddAttribute:
+			addAttributes = append(addAttributes, change)
+		case ldap.ReplaceAttribute:
+			replaceAttributes = append(replaceAttributes, change)
+		case ldap.DeleteAttribute:
+			deleteAttributes = append(deleteAttributes, change)
+		case ldap.IncrementAttribute:
+			incrementAttributes = append(incrementAttributes, change)
+		default:
+			otherAttributes = append(otherAttributes, change)
+		}
+	}
+	return addAttributes, deleteAttributes, replaceAttributes, incrementAttributes, otherAttributes
+}
+func (h modifyTestHandler) Modify(boundDN string, req ldap.ModifyRequest, conn net.Conn) (uint16, error) {
 	// only succeed on expected contents of modify.ldif:
-	if req.Dn == "cn=testy,dc=example,dc=com" && len(req.AddAttributes) == 1 &&
-		len(req.DeleteAttributes) == 3 && len(req.ReplaceAttributes) == 2 &&
-		req.DeleteAttributes[2].AttrType == "details" && len(req.DeleteAttributes[2].AttrVals) == 0 {
-		return LDAPResultSuccess, nil
+	addAttributes, deleteAttributes, replaceAttributes, incrementAttributes, otherAttributes := extractChanges(req)
+	if req.DN == "cn=testy,dc=example,dc=com" &&
+		len(incrementAttributes) == 0 &&
+		len(otherAttributes) == 0 &&
+		len(addAttributes) == 1 &&
+		len(deleteAttributes) == 3 &&
+		len(replaceAttributes) == 2 &&
+		deleteAttributes[2].Modification.Type == "details" &&
+		len(deleteAttributes[2].Modification.Vals) == 0 {
+		return ldap.LDAPResultSuccess, nil
 	}
-	return LDAPResultInsufficientAccessRights, nil
+	return ldap.LDAPResultInsufficientAccessRights, nil
 }
-func (h modifyTestHandler) ModifyDN(boundDN string, req ModifyDNRequest, conn net.Conn) (LDAPResultCode, error) {
-	return LDAPResultInsufficientAccessRights, nil
+func (h modifyTestHandler) ModifyDN(boundDN string, req ldap.ModifyDNRequest, conn net.Conn) (uint16, error) {
+	return ldap.LDAPResultInsufficientAccessRights, nil
 }
