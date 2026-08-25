@@ -57,12 +57,14 @@ func HandleSearchRequest(req *ber.Packet, controls *[]ldap.Control, messageID ui
 	for _, entry := range searchResp.Entries {
 		if server.EnforceLDAP {
 			// filter
-			keep, resultCode := ServerApplyFilter(filterPacket, entry)
-			if resultCode != ldap.LDAPResultSuccess {
-				log.Printf("Error Applying filter: %v", searchReq.Filter)
+			matched, resultCode := ServerApplyFilter(filterPacket, entry)
+			// Per https://datatracker.ietf.org/doc/html/rfc4511#section-4.5.1.7
+			// unimplemented search tags/filters should match as "UNDEFINED" which essentially means they match as false.
+			// They should not return an error
+			if resultCode != ldap.LDAPResultSuccess && resultCode != ldap.LDAPResultFilterError {
 				return ldap.NewError(resultCode, errors.New("ServerApplyFilter error"))
 			}
-			if !keep {
+			if !matched {
 				continue
 			}
 

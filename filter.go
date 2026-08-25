@@ -12,22 +12,29 @@ import (
 	"github.com/go-ldap/ldap/v3"
 )
 
+var ErrorInvalidFilter = errors.New("invalid filter")
+
 func ServerApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
+	// Note: ldap.LDAPResultProtocolError is used for invalid queries. eg equals only having one attribute
+	// ldap.LDAPResultFilterError is used for not implemented or attributes that don't exist
+	// see https://datatracker.ietf.org/doc/html/rfc4511#section-4.5.1.7
+	// and Clause 7.8 of https://www.itu.int/rec/T-REC-X.511-201910-I/en for more information
+	// TODO: change return value to an enum to handle "UNDEFINED" properly
 	switch f.Tag {
 	default:
-		return false, ldap.LDAPResultOperationsError
+		return false, ldap.LDAPResultFilterError
 	case ldap.FilterEqualityMatch:
 		if len(f.Children) != 2 {
-			return false, ldap.LDAPResultOperationsError
+			return false, ldap.LDAPResultProtocolError
 		}
 		attribute, ok := f.Children[0].Value.(string)
 		if !ok {
-			return false, ldap.LDAPResultOperationsError
+			return false, ldap.LDAPResultProtocolError
 		}
 
 		value, ok := f.Children[1].Value.(string)
 		if !ok {
-			return false, ldap.LDAPResultOperationsError
+			return false, ldap.LDAPResultProtocolError
 		}
 
 		if strings.ToLower(attribute) == "dn" {
@@ -44,12 +51,14 @@ func ServerApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 				}
 			}
 		}
+
 	case ldap.FilterPresent:
 		for _, a := range entry.Attributes {
 			if strings.EqualFold(a.Name, f.Data.String()) {
 				return true, ldap.LDAPResultSuccess
 			}
 		}
+
 	case ldap.FilterAnd:
 		for _, child := range f.Children {
 			ok, exitCode := ServerApplyFilter(child, entry)
@@ -76,7 +85,7 @@ func ServerApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 		}
 	case ldap.FilterNot:
 		if len(f.Children) != 1 {
-			return false, ldap.LDAPResultOperationsError
+			return false, ldap.LDAPResultProtocolError
 		}
 		ok, exitCode := ServerApplyFilter(f.Children[0], entry)
 		if exitCode != ldap.LDAPResultSuccess {
@@ -84,13 +93,14 @@ func ServerApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 		} else if !ok {
 			return true, ldap.LDAPResultSuccess
 		}
+
 	case ldap.FilterSubstrings:
 		if len(f.Children) != 2 {
-			return false, ldap.LDAPResultOperationsError
+			return false, ldap.LDAPResultProtocolError
 		}
 		attribute, ok := f.Children[0].Value.(string)
 		if !ok {
-			return false, ldap.LDAPResultOperationsError
+			return false, ldap.LDAPResultProtocolError
 		}
 		valueBytes := f.Children[1].Children[0].Data.Bytes()
 		valueLower := strings.ToLower(string(valueBytes[:]))
@@ -116,11 +126,11 @@ func ServerApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 			}
 		}
 	case ldap.FilterGreaterOrEqual: // TODO
-		return false, ldap.LDAPResultOperationsError
+		return false, ldap.LDAPResultFilterError
 	case ldap.FilterLessOrEqual: // TODO
-		return false, ldap.LDAPResultOperationsError
+		return false, ldap.LDAPResultFilterError
 	case ldap.FilterApproxMatch: // TODO
-		return false, ldap.LDAPResultOperationsError
+		return false, ldap.LDAPResultFilterError
 	case ldap.FilterExtensibleMatch:
 		// We don't implement extensible matching server-side; defer to backend results.
 		return true, ldap.LDAPResultSuccess
