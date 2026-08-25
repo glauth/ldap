@@ -37,10 +37,8 @@ func ServerApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 			return false, ldap.LDAPResultProtocolError
 		}
 
-		if strings.ToLower(attribute) == "dn" {
-			if strings.EqualFold(entry.DN, value) {
-				return true, ldap.LDAPResultSuccess
-			}
+		if strings.EqualFold(attribute, "dn") && strings.EqualFold(entry.DN, value) {
+			return true, ldap.LDAPResultSuccess
 		}
 		for _, a := range entry.Attributes {
 			if strings.EqualFold(a.Name, attribute) {
@@ -159,6 +157,7 @@ func GetFilterAttribute(filter string, attr string) (string, error) {
 	}
 	return parseFilterAttribute(f, attr)
 }
+
 func parseFilterAttribute(f *ber.Packet, attr string) (string, error) {
 	objectClass := ""
 	switch f.Tag {

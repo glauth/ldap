@@ -487,7 +487,7 @@ func (b bindPanic) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, err
 type bindCaseInsensitive struct{}
 
 func (b bindCaseInsensitive) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
-	if strings.ToLower(bindDN) == "cn=case,o=testers,c=test" && bindSimplePw == "iLike2test" {
+	if strings.EqualFold(bindDN, "cn=case,o=testers,c=test") && strings.EqualFold(bindSimplePw, "iLike2test") {
 		return ldap.LDAPResultSuccess, nil
 	}
 	return ldap.LDAPResultInvalidCredentials, nil

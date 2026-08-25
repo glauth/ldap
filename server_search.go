@@ -53,7 +53,6 @@ func HandleSearchRequest(req *ber.Packet, controls *[]ldap.Control, messageID ui
 	}
 
 	i := 0
-	searchReqBaseDNLower := strings.ToLower(searchReq.BaseDN)
 	for _, entry := range searchResp.Entries {
 		if server.EnforceLDAP {
 			// filter
@@ -72,16 +71,15 @@ func HandleSearchRequest(req *ber.Packet, controls *[]ldap.Control, messageID ui
 			switch searchReq.Scope {
 			case ldap.ScopeWholeSubtree: // The scope is constrained to the entry named by baseObject and to all its subordinates.
 			case ldap.ScopeBaseObject: // The scope is constrained to the entry named by baseObject.
-				if strings.ToLower(entry.DN) != searchReqBaseDNLower {
+				if !strings.EqualFold(entry.DN, searchReq.BaseDN) {
 					continue
 				}
 			case ldap.ScopeSingleLevel: // The scope is constrained to the immediate subordinates of the entry named by baseObject.
-				entryDNLower := strings.ToLower(entry.DN)
-				parts := strings.Split(entryDNLower, ",")
-				if len(parts) < 2 && entryDNLower != searchReqBaseDNLower {
+				parts := strings.Split(entry.DN, ",")
+				if len(parts) < 2 && !strings.EqualFold(entry.DN, searchReq.BaseDN) {
 					continue
 				}
-				if dnSuffix := strings.Join(parts[1:], ","); dnSuffix != searchReqBaseDNLower {
+				if dnSuffix := strings.Join(parts[1:], ","); !strings.EqualFold(dnSuffix, searchReq.BaseDN) {
 					continue
 				}
 			}
@@ -192,18 +190,16 @@ func filterAttributes(entry *ldap.Entry, attributes []string) (*ldap.Entry, erro
 
 	if len(attributes) > 1 || (len(attributes) == 1 && len(attributes[0]) > 0) {
 		for _, attr := range entry.Attributes {
-			attrNameLower := strings.ToLower(attr.Name)
 			for _, requested := range attributes {
-				requestedLower := strings.ToLower(requested)
 				// You can request the directory server to return operational attributes by adding + (the plus sign) in your ldapsearch command.
 				// "+supportedControl" is treated as an operational attribute
-				if strings.HasPrefix(attrNameLower, "+") {
-					if requestedLower == "+" || attrNameLower == "+"+requestedLower {
+				if strings.HasPrefix(attr.Name, "+") {
+					if requested == "+" || strings.EqualFold(attr.Name, "+"+requested) {
 						newAttributes = append(newAttributes, ldap.NewEntryAttribute(attr.Name[1:], attr.Values))
 						break
 					}
 				} else {
-					if requested == "*" || attrNameLower == requestedLower {
+					if requested == "*" || strings.EqualFold(attr.Name, requested) {
 						newAttributes = append(newAttributes, attr)
 						break
 					}
