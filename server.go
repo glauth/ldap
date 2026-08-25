@@ -233,7 +233,7 @@ func (server *Server) Close() {
 	}
 }
 
-func handleClose(fnName string, closeFn Closer, boundDN string, conn net.Conn) {
+func handleCloseFunc(fnName string, closeFn Closer, boundDN string, conn net.Conn) {
 	defer func() {
 		panicResult := recover()
 		if panicResult != nil {
@@ -241,6 +241,12 @@ func handleClose(fnName string, closeFn Closer, boundDN string, conn net.Conn) {
 		}
 	}()
 	closeFn.Close(boundDN, conn)
+}
+
+func handleClose(fns map[string]Closer, boundDN string, conn net.Conn) {
+	for fnName, closeFn := range fns {
+		handleCloseFunc(fnName, closeFn, boundDN, conn)
+	}
 }
 
 func (server *Server) handleConnection(conn net.Conn) {
@@ -251,9 +257,7 @@ func (server *Server) handleConnection(conn net.Conn) {
 			log.Printf("Recovered from panic in handleConnection: %s\n%s", panicResult, string(debug.Stack()))
 		}
 
-		for fnName, closeFn := range server.CloseFns {
-			handleClose(fnName, closeFn, boundDN, conn)
-		}
+		handleClose(server.CloseFns, boundDN, conn)
 		conn.Close()
 	}()
 handler:
