@@ -1,10 +1,11 @@
-package ldap
+package ldaps
 
 import (
 	"reflect"
 	"testing"
 
 	ber "github.com/go-asn1-ber/asn1-ber"
+	"github.com/go-ldap/ldap/v3"
 )
 
 type compileTest struct {
@@ -12,31 +13,32 @@ type compileTest struct {
 	filterType ber.Tag
 }
 
+// Uses ldap.EscapeFilter to conform to RFC4515
 var testFilters = []compileTest{
-	{filterStr: "(&(sn=Müller)(givenName=Bob))", filterType: FilterAnd},
-	{filterStr: "(|(sn=Möller)(givenName=Bob))", filterType: FilterOr},
-	{filterStr: "(!(sn=Møller))", filterType: FilterNot},
-	{filterStr: "(sn=Müller)", filterType: FilterEqualityMatch},
-	{filterStr: "(sn=Möll*)", filterType: FilterSubstrings},
-	{filterStr: "(sn=*Møll)", filterType: FilterSubstrings},
-	{filterStr: "(sn=*Müll*)", filterType: FilterSubstrings},
-	{filterStr: "(sn>=Möller)", filterType: FilterGreaterOrEqual},
-	{filterStr: "(sn<=Møller)", filterType: FilterLessOrEqual},
-	{filterStr: "(sn=*)", filterType: FilterPresent},
-	{filterStr: "(sn~=Müller)", filterType: FilterApproxMatch},
-	// { filterStr: "()", filterType: FilterExtensibleMatch },
+	{filterStr: "(&(sn=" + ldap.EscapeFilter("Müller") + ")(givenName=Bob))", filterType: ldap.FilterAnd},
+	{filterStr: "(|(sn=" + ldap.EscapeFilter("Möller") + ")(givenName=Bob))", filterType: ldap.FilterOr},
+	{filterStr: "(!(sn=" + ldap.EscapeFilter("Møller") + "))", filterType: ldap.FilterNot},
+	{filterStr: "(sn=" + ldap.EscapeFilter("Müller") + ")", filterType: ldap.FilterEqualityMatch},
+	{filterStr: "(sn=" + ldap.EscapeFilter("Möll") + "*)", filterType: ldap.FilterSubstrings},
+	{filterStr: "(sn=*" + ldap.EscapeFilter("Møll") + ")", filterType: ldap.FilterSubstrings},
+	{filterStr: "(sn=*" + ldap.EscapeFilter("Müll") + "*)", filterType: ldap.FilterSubstrings},
+	{filterStr: "(sn>=" + ldap.EscapeFilter("Möller") + ")", filterType: ldap.FilterGreaterOrEqual},
+	{filterStr: "(sn<=" + ldap.EscapeFilter("Møller") + ")", filterType: ldap.FilterLessOrEqual},
+	{filterStr: "(sn=*)", filterType: ldap.FilterPresent},
+	{filterStr: "(sn~=" + ldap.EscapeFilter("Müller") + ")", filterType: ldap.FilterApproxMatch},
+	// { filterStr: "()", filterType: ldap.FilterExtensibleMatch },
 }
 
 func TestFilter(t *testing.T) {
 	// Test Compiler and Decompiler
 	for _, i := range testFilters {
-		filter, err := CompileFilter(i.filterStr)
+		filter, err := ldap.CompileFilter(i.filterStr)
 		if err != nil {
 			t.Errorf("Problem compiling %s - %s", i.filterStr, err.Error())
 		} else if filter.Tag != i.filterType {
-			t.Errorf("%q Expected %q got %q", i.filterStr, FilterMap[i.filterType], FilterMap[filter.Tag])
+			t.Errorf("%q Expected %q got %q", i.filterStr, ldap.FilterMap[uint64(i.filterType)], ldap.FilterMap[uint64(filter.Tag)])
 		} else {
-			o, err := DecompileFilter(filter)
+			o, err := ldap.DecompileFilter(filter)
 			if err != nil {
 				t.Errorf("Problem compiling %s - %s", i.filterStr, err.Error())
 			} else if i.filterStr != o {
@@ -58,7 +60,7 @@ var binTestFilters = []binTestFilter{
 func TestFiltersDecode(t *testing.T) {
 	for i, test := range binTestFilters {
 		p := ber.DecodePacket(test.bin)
-		if filter, err := DecompileFilter(p); err != nil {
+		if filter, err := ldap.DecompileFilter(p); err != nil {
 			t.Errorf("binTestFilters[%d], DecompileFilter returned : %s", i, err)
 		} else if filter != test.str {
 			t.Errorf("binTestFilters[%d], %q expected, got %q", i, test.str, filter)
@@ -68,7 +70,7 @@ func TestFiltersDecode(t *testing.T) {
 
 func TestFiltersEncode(t *testing.T) {
 	for i, test := range binTestFilters {
-		p, err := CompileFilter(test.str)
+		p, err := ldap.CompileFilter(test.str)
 		if err != nil {
 			t.Errorf("binTestFilters[%d], CompileFilter returned : %s", i, err)
 			continue
@@ -92,7 +94,7 @@ func BenchmarkFilterCompile(b *testing.B) {
 	maxIdx := len(filters)
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		CompileFilter(filters[i%maxIdx])
+		ldap.CompileFilter(filters[i%maxIdx])
 	}
 }
 
@@ -102,13 +104,13 @@ func BenchmarkFilterDecompile(b *testing.B) {
 
 	// Test Compiler and Decompiler
 	for idx, i := range testFilters {
-		filters[idx], _ = CompileFilter(i.filterStr)
+		filters[idx], _ = ldap.CompileFilter(i.filterStr)
 	}
 
 	maxIdx := len(filters)
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		DecompileFilter(filters[i%maxIdx])
+		ldap.DecompileFilter(filters[i%maxIdx])
 	}
 }
 
