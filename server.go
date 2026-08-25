@@ -1,6 +1,7 @@
 package ldaps
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"io"
@@ -65,9 +66,11 @@ type Server struct {
 	ExtendedFns map[string]Extender
 	UnbindFns   map[string]Unbinder
 	CloseFns    map[string]Closer
-	Quit        chan bool
+	Context     context.Context
+	cancel      func()
 	EnforceLDAP bool
 	stats       *stats
+	ln          net.Listener
 
 	// If set, server will accept StartTLS.
 	TLSConfig *tls.Config
@@ -92,8 +95,12 @@ type ServerSearchResult struct {
 }
 
 func NewServer() *Server {
+	return NewServerContext(context.Background())
+}
+
+func NewServerContext(ctx context.Context) *Server {
 	s := new(Server)
-	s.Quit = make(chan bool)
+	s.Context, s.cancel = context.WithCancel(ctx)
 
 	d := defaultHandler{}
 	s.BindFns = make(map[string]Binder)
@@ -166,10 +173,6 @@ func (server *Server) CloseFunc(baseDN string, f Closer) {
 	server.CloseFns[baseDN] = f
 }
 
-func (server *Server) QuitChannel(quit chan bool) {
-	server.Quit = quit
-}
-
 func (server *Server) ListenAndServeTLS(listenString string, certFile string, keyFile string) error {
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
@@ -195,6 +198,7 @@ func (server *Server) SetStats(enable bool) {
 func (server *Server) GetStats() Stats {
 	defer server.stats.statsMutex.Unlock()
 	server.stats.statsMutex.Lock()
+
 	return server.stats.Stats
 }
 
@@ -203,10 +207,12 @@ func (server *Server) ListenAndServe(listenString string) error {
 	if err != nil {
 		return err
 	}
+
 	return server.Serve(ln)
 }
 
 func (server *Server) Serve(ln net.Listener) error {
+	server.ln = ln
 	newConn := make(chan net.Conn)
 	go func() {
 		for {
@@ -227,9 +233,9 @@ listener:
 		case c := <-newConn:
 			server.stats.countConns(1)
 			go server.handleConnection(c)
-		case <-server.Quit:
-			ln.Close()
-			close(server.Quit)
+		case <-server.Context.Done():
+			server.cancel = nil
+			server.Close()
 			break listener
 		}
 	}
@@ -238,8 +244,13 @@ listener:
 
 // Close closes the underlying net.Listener, and waits for confirmation
 func (server *Server) Close() {
-	server.Quit <- true
-	<-server.Quit
+	if server.ln != nil {
+		server.ln.Close()
+		server.ln = nil
+	}
+	if server.cancel != nil {
+		server.cancel()
+	}
 }
 
 func (server *Server) handleConnection(conn net.Conn) {
