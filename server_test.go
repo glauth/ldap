@@ -1,7 +1,8 @@
-package ldap
+package ldaps
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -13,16 +14,17 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-ldap/ldap/v3"
 )
 
-var listenString = "localhost:3389"
-var ldapURL = "ldap://" + listenString
-var timeout = 400 * time.Millisecond
-var serverBaseDN = "o=testers,c=test"
+const (
+	timeout      = 100 * time.Millisecond
+	serverBaseDN = "o=testers,c=test"
+)
 
 type selfSignedCert struct {
 	// Path to the SSL certificates.
@@ -32,7 +34,22 @@ type selfSignedCert struct {
 	CAKeyPath, KeyPath string
 }
 
-func newSelfSignedCert() *selfSignedCert {
+// ListenAndServe starts s in a new go routine. It ensures that s is listening before returning the address the server is listening on
+func ListenAndServe(t *testing.T, s *Server) (net.Addr, error) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("s.ListenAndServe failed: %s", err.Error())
+		}
+	}()
+	return ln.Addr(), nil
+}
+
+func newSelfSignedCert(t *testing.T) *selfSignedCert {
+	tempDir := t.TempDir()
 	capk, err := rsa.GenerateKey(rand.Reader, 1024)
 	if err != nil {
 		panic(err)
@@ -67,7 +84,7 @@ func newSelfSignedCert() *selfSignedCert {
 	}
 	// fmt.Printf("CA CERT\n%#v\n", caCert)
 	caCertPEM := &pem.Block{Type: "CERTIFICATE", Bytes: caCert}
-	caCertFile, err := os.CreateTemp("", "cacert-*.pem")
+	caCertFile, err := os.CreateTemp(tempDir, "cacert-*.pem")
 	if err != nil {
 		panic(err)
 	}
@@ -76,7 +93,7 @@ func newSelfSignedCert() *selfSignedCert {
 	}
 	caCertFile.Close()
 
-	caKeyFile, err := os.CreateTemp("", "cakey-*.pem")
+	caKeyFile, err := os.CreateTemp(tempDir, "cakey-*.pem")
 	if err != nil {
 		panic(err)
 	}
@@ -117,7 +134,7 @@ func newSelfSignedCert() *selfSignedCert {
 		panic(err)
 	}
 	certPEM := &pem.Block{Type: "CERTIFICATE", Bytes: cert}
-	certFile, err := os.CreateTemp("", "sslcert-*.pem")
+	certFile, err := os.CreateTemp(tempDir, "sslcert-*.pem")
 	if err != nil {
 		panic(err)
 	}
@@ -126,7 +143,7 @@ func newSelfSignedCert() *selfSignedCert {
 	}
 	certFile.Close()
 
-	keyFile, err := os.CreateTemp("", "key-*.pem")
+	keyFile, err := os.CreateTemp(tempDir, "key-*.pem")
 	if err != nil {
 		panic(err)
 	}
@@ -161,6 +178,7 @@ func (c *selfSignedCert) ClientTLSConfig() *tls.Config {
 	if !pool.AppendCertsFromPEM(cert) {
 		panic("failed to append certificate")
 	}
+
 	return &tls.Config{
 		RootCAs: pool,
 	}
@@ -171,6 +189,7 @@ func (c *selfSignedCert) ServerTLSConfig() *tls.Config {
 	if err != nil {
 		panic(err)
 	}
+
 	return &tls.Config{
 		ServerName:   "localhost",
 		Certificates: []tls.Certificate{cert},
@@ -178,20 +197,7 @@ func (c *selfSignedCert) ServerTLSConfig() *tls.Config {
 }
 
 func TestStartTLS(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		defer func() {
-			if t.Failed() {
-				t.Logf(`NOTE: this test won't pass with the built-in Mac ldap utilities.
-Work around this by using brew install openldap, and running the test as PATH=/usr/local/opt/openldap/bin:$PATH go test.
-
-This test uses environment variables that are respected by OpenLDAP, but the Mac utilities don't let you override
-security settings through environment variables; they expect certificates to be added to the system keychain,
-which is very heavy-handed for a test like this.
-`)
-			}
-		}()
-	}
-	cert := newSelfSignedCert()
+	cert := newSelfSignedCert(t)
 	defer cert.cleanup()
 
 	s := NewServer()
@@ -200,247 +206,195 @@ which is very heavy-handed for a test like this.
 
 	s.TLSConfig = cert.ServerTLSConfig()
 
-	ln, addr := mustListen()
-	go func() {
-		if err := s.Serve(ln); err != nil {
-			t.Errorf("s.Serve failed: %s", err.Error())
-		}
-	}()
+	addr, err := ListenAndServe(t, s)
+	if err != nil {
+		t.Errorf("Failed to listen")
+		return
+	}
+	t.Cleanup(s.Close)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
 
-	done := make(chan struct{})
-	go func() {
-		cmd := exec.Command("env",
-			"LDAPTLS_CACERT="+cert.CACertPath,
-			"ldapsearch", "-H", "ldap://"+addr, "-ZZ", "-d", "-1", "-x", "-b", "o=testers,c=test")
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Error(err)
-		}
+	cmd := exec.CommandContext(ctx,
+		"ldapsearch",
+		"-H", "ldap://"+addr.String(),
+		"-ZZ", // Force TLS
+		"-d", "-1",
+		"-x",
+		"-b", "o=testers,c=test")
 
-		if !strings.Contains(string(out), "# numEntries: 3") || !strings.Contains(string(out), "result: 0 Success") {
-			t.Errorf("search did not succeed:\n%s", out)
-		}
+	// We don't care about testing validity we just want TLS to work
+	cmd.Env = append(os.Environ(), "LDAPTLS_REQCERT=ALLOW")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Error(err)
+	}
 
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(timeout):
-		t.Error("ldapsearch command timed out")
+	if !strings.Contains(string(out), "# numEntries: 3") || !strings.Contains(string(out), "result: 0 Success") {
+		t.Errorf("search did not succeed:\n%s", out)
 	}
 }
 
-// ///////////////////////
 func TestBindAnonOK(t *testing.T) {
-	done := make(chan bool)
 	s := NewServer()
+	s.SearchFunc("", searchSimple{})
 	s.BindFunc("", bindAnonOK{})
-	go func() {
-		if err := s.ListenAndServe(listenString); err != nil {
-			t.Errorf("s.ListenAndServe failed: %s", err.Error())
-		}
-	}()
 
-	go func() {
-		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x", "-b", "o=testers,c=test")
-		out, _ := cmd.CombinedOutput()
-		if !strings.Contains(string(out), "result: 0 Success") {
-			t.Errorf("ldapsearch failed: %v", string(out))
-		}
-		done <- true
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(timeout):
-		t.Errorf("ldapsearch command timed out")
+	addr, err := ListenAndServe(t, s)
+	if err != nil {
+		t.Errorf("Failed to listen")
+		return
 	}
-	s.Close()
+	t.Cleanup(s.Close)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ldapsearch", "-v", "-H", "ldap://"+addr.String(), "-x", "-b", serverBaseDN)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ldapsearch failed: %v", err)
+	}
+	if !strings.Contains(string(out), "result: 0 Success") {
+		t.Errorf("ldapsearch failed: %s", out)
+	}
 }
 
-// ///////////////////////
 func TestBindAnonFail(t *testing.T) {
-	done := make(chan bool)
+	previousOutput := log.Writer()
+	log.SetOutput(t.Output())
+
+	t.Cleanup(func() { log.SetOutput(previousOutput) })
 	s := NewServer()
-	go func() {
-		if err := s.ListenAndServe(listenString); err != nil {
-			t.Errorf("s.ListenAndServe failed: %s", err.Error())
-		}
-	}()
+	s.BindFunc("", bindSimple{})
 
-	time.Sleep(timeout)
-	go func() {
-		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x", "-b", "o=testers,c=test")
-		out, _ := cmd.CombinedOutput()
-		if !strings.Contains(string(out), "ldap_bind: Invalid credentials (49)") {
-			t.Errorf("ldapsearch failed: %v", string(out))
-		}
-		done <- true
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(timeout):
-		t.Errorf("ldapsearch command timed out")
+	addr, err := ListenAndServe(t, s)
+	if err != nil {
+		t.Errorf("Failed to listen")
+		return
 	}
-	s.Close()
+	t.Cleanup(s.Close)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ldapsearch", "-H", "ldap://"+addr.String(), "-x", "-b", serverBaseDN)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Errorf("ldapsearch succeed. It shouldn't have: %s", out)
+	}
+	if !strings.Contains(string(out), "ldap_bind: Invalid credentials (49)") {
+		t.Errorf("ldapsearch failed: %s", out)
+	}
 }
 
-// ///////////////////////
 func TestBindSimpleOK(t *testing.T) {
-	done := make(chan bool)
 	s := NewServer()
 	s.SearchFunc("", searchSimple{})
 	s.BindFunc("", bindSimple{})
-	go func() {
-		if err := s.ListenAndServe(listenString); err != nil {
-			t.Errorf("s.ListenAndServe failed: %s", err.Error())
-		}
-	}()
 
-	serverBaseDN := "o=testers,c=test"
-
-	go func() {
-		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x",
-			"-b", serverBaseDN, "-D", "cn=testy,"+serverBaseDN, "-w", "iLike2test")
-		out, _ := cmd.CombinedOutput()
-		if !strings.Contains(string(out), "result: 0 Success") {
-			t.Errorf("ldapsearch failed: %v", string(out))
-		}
-		done <- true
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(timeout):
-		t.Errorf("ldapsearch command timed out")
+	addr, err := ListenAndServe(t, s)
+	if err != nil {
+		t.Errorf("Failed to listen")
+		return
 	}
-	s.Close()
+	t.Cleanup(s.Close)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ldapsearch", "-H", "ldap://"+addr.String(), "-x",
+		"-b", serverBaseDN, "-D", "cn=testy,"+serverBaseDN, "-w", "iLike2test")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ldapsearch failed: %v", err)
+	}
+	if !strings.Contains(string(out), "result: 0 Success") {
+		t.Errorf("ldapsearch failed: %s", out)
+	}
 }
 
-// ///////////////////////
 func TestBindSimpleFailBadPw(t *testing.T) {
-	done := make(chan bool)
+	previousOutput := log.Writer()
+	log.SetOutput(t.Output())
+
+	t.Cleanup(func() { log.SetOutput(previousOutput) })
 	s := NewServer()
 	s.BindFunc("", bindSimple{})
-	go func() {
-		if err := s.ListenAndServe(listenString); err != nil {
-			t.Errorf("s.ListenAndServe failed: %s", err.Error())
-		}
-	}()
 
-	serverBaseDN := "o=testers,c=test"
-
-	go func() {
-		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x",
-			"-b", serverBaseDN, "-D", "cn=testy,"+serverBaseDN, "-w", "BADPassword")
-		out, _ := cmd.CombinedOutput()
-		if !strings.Contains(string(out), "ldap_bind: Invalid credentials (49)") {
-			t.Errorf("ldapsearch succeeded - should have failed: %v", string(out))
-		}
-		done <- true
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(timeout):
-		t.Errorf("ldapsearch command timed out")
+	addr, err := ListenAndServe(t, s)
+	if err != nil {
+		t.Errorf("Failed to listen")
+		return
 	}
-	s.Close()
+	t.Cleanup(s.Close)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ldapsearch", "-H", "ldap://"+addr.String(), "-x",
+		"-b", serverBaseDN, "-D", "cn=testy,"+serverBaseDN, "-w", "BADPassword")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Errorf("ldapsearch succeed. It shouldn't have: %s", out)
+	}
+	if !strings.Contains(string(out), "ldap_bind: Invalid credentials (49)") {
+		t.Errorf("ldapsearch succeeded - should have failed: %s", out)
+	}
 }
 
-// ///////////////////////
 func TestBindSimpleFailBadDn(t *testing.T) {
-	done := make(chan bool)
+	previousOutput := log.Writer()
+	log.SetOutput(t.Output())
+
+	t.Cleanup(func() { log.SetOutput(previousOutput) })
 	s := NewServer()
 	s.BindFunc("", bindSimple{})
-	go func() {
-		if err := s.ListenAndServe(listenString); err != nil {
-			t.Errorf("s.ListenAndServe failed: %s", err.Error())
-		}
-	}()
 
-	serverBaseDN := "o=testers,c=test"
-
-	go func() {
-		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x",
-			"-b", serverBaseDN, "-D", "cn=testoy,"+serverBaseDN, "-w", "iLike2test")
-		out, _ := cmd.CombinedOutput()
-		if string(out) != "ldap_bind: Invalid credentials (49)\n" {
-			t.Errorf("ldapsearch succeeded - should have failed: %v", string(out))
-		}
-		done <- true
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(timeout):
-		t.Errorf("ldapsearch command timed out")
+	addr, err := ListenAndServe(t, s)
+	if err != nil {
+		t.Errorf("Failed to listen")
+		return
 	}
-	s.Close()
+	t.Cleanup(s.Close)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ldapsearch", "-H", "ldap://"+addr.String(), "-x",
+		"-b", serverBaseDN, "-D", "cn=testoy,"+serverBaseDN, "-w", "iLike2test")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Errorf("ldapsearch succeed. It shouldn't have: %s", out)
+	}
+	if string(out) != "ldap_bind: Invalid credentials (49)\n" {
+		t.Errorf("ldapsearch succeeded - should have failed: %s", out)
+	}
 }
 
-// ///////////////////////
-func TestBindSSL(t *testing.T) {
-	ldapURLSSL := "ldaps://" + listenString
-	longerTimeout := 300 * time.Millisecond
-	done := make(chan bool)
-	s := NewServer()
-	s.BindFunc("", bindAnonOK{})
-	go func() {
-		if err := s.ListenAndServeTLS(listenString, "tests/cert_DONOTUSE.pem", "tests/key_DONOTUSE.pem"); err != nil {
-			t.Errorf("s.ListenAndServeTLS failed: %s", err.Error())
-		}
-	}()
-
-	go func() {
-		cmd := exec.Command("ldapsearch", "-H", ldapURLSSL, "-x", "-b", "o=testers,c=test")
-		cmd.Env = []string{"LDAPTLS_REQCERT=ALLOW"}
-		out, _ := cmd.CombinedOutput()
-		if !strings.Contains(string(out), "result: 0 Success") {
-			t.Errorf("ldapsearch failed: %v", string(out))
-		}
-		done <- true
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(longerTimeout * 2):
-		t.Errorf("ldapsearch command timed out")
-	}
-	s.Close()
-}
-
-// ///////////////////////
 func TestBindPanic(t *testing.T) {
-	done := make(chan bool)
+	previousOutput := log.Writer()
+	log.SetOutput(t.Output())
+
+	t.Cleanup(func() { log.SetOutput(previousOutput) })
+
 	s := NewServer()
 	s.BindFunc("", bindPanic{})
-	go func() {
-		if err := s.ListenAndServe(listenString); err != nil {
-			t.Errorf("s.ListenAndServe failed: %s", err.Error())
-		}
-	}()
 
-	go func() {
-		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x", "-b", "o=testers,c=test")
-		out, _ := cmd.CombinedOutput()
-		if !strings.Contains(string(out), "ldap_bind: Operations error") {
-			t.Errorf("ldapsearch should have returned operations error due to panic: %v", string(out))
-		}
-		done <- true
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(timeout):
-		t.Errorf("ldapsearch command timed out")
+	addr, err := ListenAndServe(t, s)
+	if err != nil {
+		t.Errorf("Failed to listen")
+		return
 	}
-	s.Close()
+	t.Cleanup(s.Close)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ldapsearch", "-H", "ldap://"+addr.String(), "-x", "-b", serverBaseDN)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Errorf("ldapsearch succeed. It shouldn't have: %s", out)
+	}
+	if !strings.Contains(string(out), "ldap_bind: Other (e.g., implementation specific) error (80)") {
+		t.Errorf("ldapsearch should have returned Other error due to panic: %s", out)
+	}
 }
 
-// ///////////////////////
 type testStatsWriter struct {
 	buffer *bytes.Buffer
 }
@@ -454,31 +408,28 @@ func TestSearchStats(t *testing.T) {
 	w := testStatsWriter{&bytes.Buffer{}}
 	log.SetOutput(w)
 
-	done := make(chan bool)
 	s := NewServer()
 
 	s.SearchFunc("", searchSimple{})
 	s.BindFunc("", bindAnonOK{})
 	s.SetStats(true)
-	go func() {
-		if err := s.ListenAndServe(listenString); err != nil {
-			t.Errorf("s.ListenAndServe failed: %s", err.Error())
-		}
-	}()
 
-	go func() {
-		cmd := exec.Command("ldapsearch", "-H", ldapURL, "-x", "-b", "o=testers,c=test")
-		out, _ := cmd.CombinedOutput()
-		if !strings.Contains(string(out), "result: 0 Success") {
-			t.Errorf("ldapsearch failed: %v", string(out))
-		}
-		done <- true
-	}()
+	addr, err := ListenAndServe(t, s)
+	if err != nil {
+		t.Errorf("Failed to listen")
+		return
+	}
+	t.Cleanup(s.Close)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
 
-	select {
-	case <-done:
-	case <-time.After(timeout):
-		t.Errorf("ldapsearch command timed out")
+	cmd := exec.CommandContext(ctx, "ldapsearch", "-H", "ldap://"+addr.String(), "-x", "-b", serverBaseDN)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ldapsearch failed: %v", err)
+	}
+	if !strings.Contains(string(out), "result: 0 Success") {
+		t.Errorf("ldapsearch failed: %s", out)
 	}
 
 	stats := s.GetStats()
@@ -486,151 +437,151 @@ func TestSearchStats(t *testing.T) {
 	if stats.Conns != 1 || stats.Binds != 1 {
 		t.Errorf("Stats data missing or incorrect: %v", w.buffer.String())
 	}
-	s.Close()
 }
 
-// ///////////////////////
-type bindAnonOK struct {
-}
+type bindAnonOK struct{}
 
-func (b bindAnonOK) Bind(bindDN, bindSimplePw string, conn net.Conn) (LDAPResultCode, error) {
+func (b bindAnonOK) Bind(ctx context.Context, bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
 	if bindDN == "" && bindSimplePw == "" {
-		return LDAPResultSuccess, nil
+		return nil, nil
 	}
-	return LDAPResultInvalidCredentials, nil
+	return nil, ldap.NewError(ldap.LDAPResultInvalidCredentials, ErrEmpty)
 }
 
-type bindSimple struct {
-}
+type bindSimple struct{}
 
-func (b bindSimple) Bind(bindDN, bindSimplePw string, conn net.Conn) (LDAPResultCode, error) {
+func (b bindSimple) Bind(ctx context.Context, bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
 	if bindDN == "cn=testy,o=testers,c=test" && bindSimplePw == "iLike2test" {
-		return LDAPResultSuccess, nil
+		return nil, nil
 	}
-	return LDAPResultInvalidCredentials, nil
+
+	return nil, ldap.NewError(ldap.LDAPResultInvalidCredentials, ErrEmpty)
 }
 
-type bindSimple2 struct {
-}
+type bindSimple2 struct{}
 
-func (b bindSimple2) Bind(bindDN, bindSimplePw string, conn net.Conn) (LDAPResultCode, error) {
+func (b bindSimple2) Bind(ctx context.Context, bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
 	if bindDN == "cn=testy,o=testers,c=testz" && bindSimplePw == "ZLike2test" {
-		return LDAPResultSuccess, nil
+		return nil, nil
 	}
-	return LDAPResultInvalidCredentials, nil
+
+	return nil, ldap.NewError(ldap.LDAPResultInvalidCredentials, ErrEmpty)
 }
 
-type bindPanic struct {
-}
+type bindPanic struct{}
 
-func (b bindPanic) Bind(bindDN, bindSimplePw string, conn net.Conn) (LDAPResultCode, error) {
+func (b bindPanic) Bind(ctx context.Context, bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
 	panic("test panic at the disco")
 }
 
-type bindCaseInsensitive struct {
-}
+type bindCaseInsensitive struct{}
 
-func (b bindCaseInsensitive) Bind(bindDN, bindSimplePw string, conn net.Conn) (LDAPResultCode, error) {
-	if strings.ToLower(bindDN) == "cn=case,o=testers,c=test" && bindSimplePw == "iLike2test" {
-		return LDAPResultSuccess, nil
+func (b bindCaseInsensitive) Bind(ctx context.Context, bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
+	if strings.EqualFold(bindDN, "cn=case,o=testers,c=test") && strings.EqualFold(bindSimplePw, "iLike2test") {
+		return nil, nil
 	}
-	return LDAPResultInvalidCredentials, nil
+
+	return nil, ldap.NewError(ldap.LDAPResultInvalidCredentials, ErrEmpty)
 }
 
-type searchSimple struct {
-}
+type searchSimple struct{}
 
-func (s searchSimple) Search(boundDN string, searchReq SearchRequest, conn net.Conn) (ServerSearchResult, error) {
-	entries := []*Entry{
-		{"cn=ned,o=testers,c=test", []*EntryAttribute{
-			{"cn", []string{"ned"}},
-			{"o", []string{"ate"}},
-			{"uidNumber", []string{"5000"}},
-			{"accountstatus", []string{"active"}},
-			{"uid", []string{"ned"}},
-			{"description", []string{"ned via sa"}},
-			{"objectclass", []string{"posixaccount"}},
-		}},
-		{"cn=trent,o=testers,c=test", []*EntryAttribute{
-			{"cn", []string{"trent"}},
-			{"o", []string{"ate"}},
-			{"uidNumber", []string{"5005"}},
-			{"accountstatus", []string{"active"}},
-			{"uid", []string{"trent"}},
-			{"description", []string{"trent via sa"}},
-			{"objectclass", []string{"posixaccount"}},
-		}},
-		{"cn=randy,o=testers,c=test", []*EntryAttribute{
-			{"cn", []string{"randy"}},
-			{"o", []string{"ate"}},
-			{"uidNumber", []string{"5555"}},
-			{"accountstatus", []string{"active"}},
-			{"uid", []string{"randy"}},
-			{"objectclass", []string{"posixaccount"}},
-		}},
+func (s searchSimple) Search(ctx context.Context, boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
+	entries := []*ldap.Entry{
+		ldap.NewEntry("cn=ned,o=testers,c=test", map[string][]string{
+			"cn":            {"ned"},
+			"o":             {"ate"},
+			"uidNumber":     {"5000"},
+			"accountstatus": {"active"},
+			"uid":           {"ned"},
+			"description":   {"ned via sa"},
+			"objectclass":   {"posixaccount"},
+		}),
+		ldap.NewEntry("cn=trent,o=testers,c=test", map[string][]string{
+			"cn":            {"trent"},
+			"o":             {"ate"},
+			"uidNumber":     {"5005"},
+			"accountstatus": {"active"},
+			"uid":           {"trent"},
+			"description":   {"trent via sa"},
+			"objectclass":   {"posixaccount"},
+		}),
+		ldap.NewEntry("cn=randy,o=testers,c=test", map[string][]string{
+			"cn":            {"randy"},
+			"o":             {"ate"},
+			"uidNumber":     {"5555"},
+			"accountstatus": {"active"},
+			"uid":           {"randy"},
+			"objectclass":   {"posixaccount"},
+		}),
 	}
-	return ServerSearchResult{entries, []string{}, []Control{}, LDAPResultSuccess}, nil
+
+	return &ldap.SearchResult{
+		Entries: entries, Referrals: []string{}, Controls: []ldap.Control{},
+	}, nil
 }
 
-type searchSimple2 struct {
-}
+type searchSimple2 struct{}
 
-func (s searchSimple2) Search(boundDN string, searchReq SearchRequest, conn net.Conn) (ServerSearchResult, error) {
-	entries := []*Entry{
-		{"cn=hamburger,o=testers,c=testz", []*EntryAttribute{
-			{"cn", []string{"hamburger"}},
-			{"o", []string{"testers"}},
-			{"uidNumber", []string{"5000"}},
-			{"accountstatus", []string{"active"}},
-			{"uid", []string{"hamburger"}},
-			{"objectclass", []string{"posixaccount"}},
-		}},
+func (s searchSimple2) Search(ctx context.Context, boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
+	entries := []*ldap.Entry{
+		ldap.NewEntry("cn=hamburger,o=testers,c=testz", map[string][]string{
+			"cn":            {"hamburger"},
+			"o":             {"testers"},
+			"uidNumber":     {"5000"},
+			"accountstatus": {"active"},
+			"uid":           {"hamburger"},
+			"objectclass":   {"posixaccount"},
+		}),
 	}
-	return ServerSearchResult{entries, []string{}, []Control{}, LDAPResultSuccess}, nil
+
+	return &ldap.SearchResult{
+		Entries: entries, Referrals: []string{}, Controls: []ldap.Control{},
+	}, nil
 }
 
-type searchPanic struct {
-}
+type searchPanic struct{}
 
-func (s searchPanic) Search(boundDN string, searchReq SearchRequest, conn net.Conn) (ServerSearchResult, error) {
+func (s searchPanic) Search(ctx context.Context, boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
 	panic("this is a test panic")
 }
 
-type searchControls struct {
-}
+type searchControls struct{}
 
-func (s searchControls) Search(boundDN string, searchReq SearchRequest, conn net.Conn) (ServerSearchResult, error) {
-	entries := []*Entry{}
+func (s searchControls) Search(ctx context.Context, boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
+	var entries []*ldap.Entry
 	if len(searchReq.Controls) == 1 && searchReq.Controls[0].GetControlType() == "1.2.3.4.5" {
-		newEntry := &Entry{"cn=hamburger,o=testers,c=testz", []*EntryAttribute{
-			{"cn", []string{"hamburger"}},
-			{"o", []string{"testers"}},
-			{"uidNumber", []string{"5000"}},
-			{"accountstatus", []string{"active"}},
-			{"uid", []string{"hamburger"}},
-			{"objectclass", []string{"posixaccount"}},
-		}}
+		newEntry := ldap.NewEntry("cn=hamburger,o=testers,c=testz", map[string][]string{
+			"cn":            {"hamburger"},
+			"o":             {"testers"},
+			"uidNumber":     {"5000"},
+			"accountstatus": {"active"},
+			"uid":           {"hamburger"},
+			"objectclass":   {"posixaccount"},
+		})
+
 		entries = append(entries, newEntry)
 	}
-	return ServerSearchResult{entries, []string{}, []Control{}, LDAPResultSuccess}, nil
+
+	return &ldap.SearchResult{Entries: entries, Referrals: []string{}, Controls: []ldap.Control{}}, nil
 }
 
-type searchCaseInsensitive struct {
-}
+type searchCaseInsensitive struct{}
 
-func (s searchCaseInsensitive) Search(boundDN string, searchReq SearchRequest, conn net.Conn) (ServerSearchResult, error) {
-	entries := []*Entry{
-		{"cn=CASE,o=testers,c=test", []*EntryAttribute{
-			{"cn", []string{"CaSe"}},
-			{"o", []string{"ate"}},
-			{"uidNumber", []string{"5005"}},
-			{"accountstatus", []string{"active"}},
-			{"uid", []string{"trent"}},
-			{"description", []string{"trent via sa"}},
-			{"objectclass", []string{"posixaccount"}},
+func (s searchCaseInsensitive) Search(ctx context.Context, boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
+	entries := []*ldap.Entry{
+		{DN: "cn=CASE,o=testers,c=test", Attributes: []*ldap.EntryAttribute{
+			{Name: "cn", Values: []string{"CaSe"}},
+			{Name: "o", Values: []string{"ate"}},
+			{Name: "uidNumber", Values: []string{"5005"}},
+			{Name: "accountstatus", Values: []string{"active"}},
+			{Name: "uid", Values: []string{"trent"}},
+			{Name: "description", Values: []string{"trent via sa"}},
+			{Name: "objectclass", Values: []string{"posixaccount"}},
 		}},
 	}
-	return ServerSearchResult{entries, []string{}, []Control{}, LDAPResultSuccess}, nil
+
+	return &ldap.SearchResult{Entries: entries, Referrals: []string{}, Controls: []ldap.Control{}}, nil
 }
 
 func TestRouteFunc(t *testing.T) {
@@ -649,14 +600,4 @@ func TestRouteFunc(t *testing.T) {
 	if routeFunc("nosuch", []string{"x=y,a=b", "a=b", "tt"}) != "" {
 		t.Error("routeFunc failed")
 	}
-}
-
-// mustListen returns a net.Listener listening on a random port.
-func mustListen() (ln net.Listener, actualAddr string) {
-	ln, err := net.Listen("tcp", "localhost:0")
-	if err != nil {
-		panic(err)
-	}
-
-	return ln, ln.Addr().String()
 }
