@@ -190,13 +190,13 @@ func TestApplyFilter(t *testing.T) {
 		if err != nil {
 			t.Errorf("Compiling the filter failed: %v", err)
 		}
-		matched, ldapResult := ServerApplyFilter(berFilter, testInfo.Entry)
+		matched, ldapResult := ApplyFilter(berFilter, testInfo.Entry)
 		if matched != testInfo.Expected {
 			status := "did not match"
 			if matched {
 				status = "matched"
 			}
-			t.Errorf("Entry: %v %s: %q return code: %s", testInfo.Entry, status, testInfo.Filter, ldap.LDAPResultCodeMap[ldapResult])
+			t.Errorf("Entry: %v %s: %q return code: %s", testInfo.Entry, status, testInfo.Filter, ldap.LDAPResultCodeMap[ldapResult.ResultCode])
 		}
 	}
 }

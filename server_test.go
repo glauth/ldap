@@ -14,7 +14,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -179,6 +178,7 @@ func (c *selfSignedCert) ClientTLSConfig() *tls.Config {
 	if !pool.AppendCertsFromPEM(cert) {
 		panic("failed to append certificate")
 	}
+
 	return &tls.Config{
 		RootCAs: pool,
 	}
@@ -189,6 +189,7 @@ func (c *selfSignedCert) ServerTLSConfig() *tls.Config {
 	if err != nil {
 		panic(err)
 	}
+
 	return &tls.Config{
 		ServerName:   "localhost",
 		Certificates: []tls.Certificate{cert},
@@ -196,19 +197,6 @@ func (c *selfSignedCert) ServerTLSConfig() *tls.Config {
 }
 
 func TestStartTLS(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		defer func() {
-			if t.Failed() {
-				t.Logf(`NOTE: this test won't pass with the built-in Mac ldap utilities.
-Work around this by using brew install openldap, and running the test as PATH=/usr/local/opt/openldap/bin:$PATH go test.
-
-This test uses environment variables that are respected by OpenLDAP, but the Mac utilities don't let you override
-security settings through environment variables; they expect certificates to be added to the system keychain,
-which is very heavy-handed for a test like this.
-`)
-			}
-		}()
-	}
 	cert := newSelfSignedCert(t)
 	defer cert.cleanup()
 
@@ -402,8 +390,8 @@ func TestBindPanic(t *testing.T) {
 	if err == nil {
 		t.Errorf("ldapsearch succeed. It shouldn't have: %s", out)
 	}
-	if !strings.Contains(string(out), "ldap_bind: Operations error") {
-		t.Errorf("ldapsearch should have returned operations error due to panic: %s", out)
+	if !strings.Contains(string(out), "ldap_bind: Other (e.g., implementation specific) error (80)") {
+		t.Errorf("ldapsearch should have returned Other error due to panic: %s", out)
 	}
 }
 
@@ -453,49 +441,52 @@ func TestSearchStats(t *testing.T) {
 
 type bindAnonOK struct{}
 
-func (b bindAnonOK) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
+func (b bindAnonOK) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
 	if bindDN == "" && bindSimplePw == "" {
-		return ldap.LDAPResultSuccess, nil
+		return nil, nil
 	}
-	return ldap.LDAPResultInvalidCredentials, nil
+	return nil, ldap.NewError(ldap.LDAPResultInvalidCredentials, ErrEmpty)
 }
 
 type bindSimple struct{}
 
-func (b bindSimple) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
+func (b bindSimple) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
 	if bindDN == "cn=testy,o=testers,c=test" && bindSimplePw == "iLike2test" {
-		return ldap.LDAPResultSuccess, nil
+		return nil, nil
 	}
-	return ldap.LDAPResultInvalidCredentials, nil
+
+	return nil, ldap.NewError(ldap.LDAPResultInvalidCredentials, ErrEmpty)
 }
 
 type bindSimple2 struct{}
 
-func (b bindSimple2) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
+func (b bindSimple2) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
 	if bindDN == "cn=testy,o=testers,c=testz" && bindSimplePw == "ZLike2test" {
-		return ldap.LDAPResultSuccess, nil
+		return nil, nil
 	}
-	return ldap.LDAPResultInvalidCredentials, nil
+
+	return nil, ldap.NewError(ldap.LDAPResultInvalidCredentials, ErrEmpty)
 }
 
 type bindPanic struct{}
 
-func (b bindPanic) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
+func (b bindPanic) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
 	panic("test panic at the disco")
 }
 
 type bindCaseInsensitive struct{}
 
-func (b bindCaseInsensitive) Bind(bindDN, bindSimplePw string, conn net.Conn) (uint16, error) {
+func (b bindCaseInsensitive) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
 	if strings.EqualFold(bindDN, "cn=case,o=testers,c=test") && strings.EqualFold(bindSimplePw, "iLike2test") {
-		return ldap.LDAPResultSuccess, nil
+		return nil, nil
 	}
-	return ldap.LDAPResultInvalidCredentials, nil
+
+	return nil, ldap.NewError(ldap.LDAPResultInvalidCredentials, ErrEmpty)
 }
 
 type searchSimple struct{}
 
-func (s searchSimple) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
+func (s searchSimple) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
 	entries := []*ldap.Entry{
 		ldap.NewEntry("cn=ned,o=testers,c=test", map[string][]string{
 			"cn":            {"ned"},
@@ -525,14 +516,14 @@ func (s searchSimple) Search(boundDN string, searchReq ldap.SearchRequest, conn 
 		}),
 	}
 
-	return ServerSearchResult{
+	return &ldap.SearchResult{
 		Entries: entries, Referrals: []string{}, Controls: []ldap.Control{},
 	}, nil
 }
 
 type searchSimple2 struct{}
 
-func (s searchSimple2) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
+func (s searchSimple2) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
 	entries := []*ldap.Entry{
 		ldap.NewEntry("cn=hamburger,o=testers,c=testz", map[string][]string{
 			"cn":            {"hamburger"},
@@ -544,38 +535,40 @@ func (s searchSimple2) Search(boundDN string, searchReq ldap.SearchRequest, conn
 		}),
 	}
 
-	return ServerSearchResult{
+	return &ldap.SearchResult{
 		Entries: entries, Referrals: []string{}, Controls: []ldap.Control{},
 	}, nil
 }
 
 type searchPanic struct{}
 
-func (s searchPanic) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
+func (s searchPanic) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
 	panic("this is a test panic")
 }
 
 type searchControls struct{}
 
-func (s searchControls) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
-	entries := []*ldap.Entry{}
+func (s searchControls) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
+	var entries []*ldap.Entry
 	if len(searchReq.Controls) == 1 && searchReq.Controls[0].GetControlType() == "1.2.3.4.5" {
-		newEntry := &ldap.Entry{DN: "cn=hamburger,o=testers,c=testz", Attributes: []*ldap.EntryAttribute{
-			{Name: "cn", Values: []string{"hamburger"}},
-			{Name: "o", Values: []string{"testers"}},
-			{Name: "uidNumber", Values: []string{"5000"}},
-			{Name: "accountstatus", Values: []string{"active"}},
-			{Name: "uid", Values: []string{"hamburger"}},
-			{Name: "objectclass", Values: []string{"posixaccount"}},
-		}}
+		newEntry := ldap.NewEntry("cn=hamburger,o=testers,c=testz", map[string][]string{
+			"cn":            {"hamburger"},
+			"o":             {"testers"},
+			"uidNumber":     {"5000"},
+			"accountstatus": {"active"},
+			"uid":           {"hamburger"},
+			"objectclass":   {"posixaccount"},
+		})
+
 		entries = append(entries, newEntry)
 	}
-	return ServerSearchResult{entries, []string{}, []ldap.Control{}, ldap.LDAPResultSuccess}, nil
+
+	return &ldap.SearchResult{Entries: entries, Referrals: []string{}, Controls: []ldap.Control{}}, nil
 }
 
 type searchCaseInsensitive struct{}
 
-func (s searchCaseInsensitive) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (ServerSearchResult, error) {
+func (s searchCaseInsensitive) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
 	entries := []*ldap.Entry{
 		{DN: "cn=CASE,o=testers,c=test", Attributes: []*ldap.EntryAttribute{
 			{Name: "cn", Values: []string{"CaSe"}},
@@ -587,7 +580,8 @@ func (s searchCaseInsensitive) Search(boundDN string, searchReq ldap.SearchReque
 			{Name: "objectclass", Values: []string{"posixaccount"}},
 		}},
 	}
-	return ServerSearchResult{entries, []string{}, []ldap.Control{}, ldap.LDAPResultSuccess}, nil
+
+	return &ldap.SearchResult{Entries: entries, Referrals: []string{}, Controls: []ldap.Control{}}, nil
 }
 
 func TestRouteFunc(t *testing.T) {
@@ -606,14 +600,4 @@ func TestRouteFunc(t *testing.T) {
 	if routeFunc("nosuch", []string{"x=y,a=b", "a=b", "tt"}) != "" {
 		t.Error("routeFunc failed")
 	}
-}
-
-// mustListen returns a net.Listener listening on a random port.
-func mustListen() (ln net.Listener, actualAddr string) {
-	ln, err := net.Listen("tcp", "localhost:0")
-	if err != nil {
-		panic(err)
-	}
-
-	return ln, ln.Addr().String()
 }

@@ -1,60 +1,60 @@
 package ldaps
 
 import (
+	"errors"
 	"log"
 	"net"
 	"runtime/debug"
+
+	"fmt"
 
 	ber "github.com/go-asn1-ber/asn1-ber"
 	"github.com/go-ldap/ldap/v3"
 )
 
-func HandleBindRequest(req *ber.Packet, fns map[string]Binder, conn net.Conn) (resultCode uint16) {
+func HandleBindRequest(req *ber.Packet, fns map[string]Binder, conn net.Conn) (boundDN string, res *ldap.SimpleBindResult, resultErr error) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("Recovered from panic in BindFn: %s\n%s", r, string(debug.Stack()))
-			resultCode = ldap.LDAPResultOperationsError
+			resultErr = fmt.Errorf("Bind function panic: %s", r)
 		}
 	}()
 
 	// we only support ldapv3
 	ldapVersion, ok := req.Children[0].Value.(int64)
 	if !ok {
-		return ldap.LDAPResultProtocolError
+		return "", nil, ldap.NewError(ldap.LDAPResultProtocolError, fmt.Errorf("error reading LDAP version: %v", req.Children[0].Value))
 	}
 	if ldapVersion != 3 {
-		log.Printf("Unsupported LDAP version: %d", ldapVersion)
-		return ldap.LDAPResultInappropriateAuthentication
+		return "", nil, ldap.NewError(ldap.LDAPResultProtocolError, fmt.Errorf("unsupported LDAP version: %d. Please use version 3", ldapVersion))
 	}
 
 	// auth types
 	bindDN, ok := req.Children[1].Value.(string)
 	if !ok {
-		return ldap.LDAPResultProtocolError
+		return "", nil, ldap.NewError(ldap.LDAPResultProtocolError, fmt.Errorf("error reading bindDN: %v", req.Children[1].Value))
 	}
 	bindAuth := req.Children[2]
 	switch bindAuth.Tag {
 	default:
-		log.Print("Unknown LDAP authentication method")
-		return ldap.LDAPResultInappropriateAuthentication
+		return bindDN, nil, ldap.NewError(ldap.LDAPResultInappropriateAuthentication, fmt.Errorf("unknown LDAP authentication method: %v", bindAuth.Tag))
+
 	case LDAPBindAuthSimple:
-		if len(req.Children) == 3 {
-			fnNames := []string{}
-			for k := range fns {
-				fnNames = append(fnNames, k)
-			}
-			fn := routeFunc(bindDN, fnNames)
-			resultCode, err := fns[fn].Bind(bindDN, bindAuth.Data.String(), conn)
-			if err != nil {
-				log.Printf("BindFn Error %v", err)
-				return ldap.LDAPResultOperationsError
-			}
-			return resultCode
+		if len(req.Children) != 3 {
+			return bindDN, nil, ldap.NewError(ldap.LDAPResultInappropriateAuthentication, fmt.Errorf("simple bind request has %v packets, expected 3", len(req.Children)))
 		}
-		log.Print("Simple bind request has wrong # children.  len(req.Children) != 3")
-		return ldap.LDAPResultInappropriateAuthentication
+		fnNames := []string{}
+		for k := range fns {
+			fnNames = append(fnNames, k)
+		}
+
+		fn := routeFunc(bindDN, fnNames)
+
+		ret, err := fns[fn].Bind(bindDN, bindAuth.Data.String(), conn)
+
+		return bindDN, ret, err
+
 	case LDAPBindAuthSASL:
-		log.Print("SASL authentication is not supported")
-		return ldap.LDAPResultInappropriateAuthentication
+		return bindDN, nil, ldap.NewError(ldap.LDAPResultInappropriateAuthentication, errors.New("SASL authentication is not supported"))
 	}
 }

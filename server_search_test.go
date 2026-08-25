@@ -209,8 +209,8 @@ func TestSearchPanic(t *testing.T) {
 
 	cmd := exec.CommandContext(ctx, "ldapsearch", "-H", "ldap://"+addr.String(), "-x", "-b", serverBaseDN)
 	out, _ := cmd.CombinedOutput()
-	if !strings.Contains(string(out), "result: 1 Operations error") {
-		t.Errorf("ldapsearch should have returned operations error due to panic: %s", out)
+	if !strings.Contains(string(out), "result: 80 Other (e.g., implementation specific) error") {
+		t.Errorf("ldapsearch should have returned Other error due to panic: %s", out)
 	}
 }
 

@@ -6,15 +6,16 @@ package ldaps
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	ber "github.com/go-asn1-ber/asn1-ber"
 	"github.com/go-ldap/ldap/v3"
 )
 
-var ErrorInvalidFilter = errors.New("invalid filter")
+var ErrInvalidFilter = errors.New("invalid filter")
 
-func ServerApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
+func ApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, *ldap.Error) {
 	// Note: ldap.LDAPResultProtocolError is used for invalid queries. eg equals only having one attribute
 	// ldap.LDAPResultFilterError is used for not implemented or attributes that don't exist
 	// see https://datatracker.ietf.org/doc/html/rfc4511#section-4.5.1.7
@@ -22,29 +23,31 @@ func ServerApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 	// TODO: change return value to an enum to handle "UNDEFINED" properly
 	switch f.Tag {
 	default:
-		return false, ldap.LDAPResultFilterError
+		return false, &ldap.Error{ResultCode: ldap.LDAPResultFilterError, Err: fmt.Errorf("unknown LDAP filter code: %d", f.Tag)}
+
 	case ldap.FilterEqualityMatch:
 		if len(f.Children) != 2 {
-			return false, ldap.LDAPResultProtocolError
+			return false, &ldap.Error{ResultCode: ldap.LDAPResultProtocolError, Err: fmt.Errorf("%w: %w", ErrInvalidFilter, ErrInvalidPacketLength)}
 		}
+
 		attribute, ok := f.Children[0].Value.(string)
 		if !ok {
-			return false, ldap.LDAPResultProtocolError
+			return false, &ldap.Error{ResultCode: ldap.LDAPResultProtocolError, Err: ErrInvalidFilter}
 		}
 
 		value, ok := f.Children[1].Value.(string)
 		if !ok {
-			return false, ldap.LDAPResultProtocolError
+			return false, &ldap.Error{ResultCode: ldap.LDAPResultProtocolError, Err: ErrInvalidFilter}
 		}
 
 		if strings.EqualFold(attribute, "dn") && strings.EqualFold(entry.DN, value) {
-			return true, ldap.LDAPResultSuccess
+			return true, nil
 		}
 		for _, a := range entry.Attributes {
 			if strings.EqualFold(a.Name, attribute) {
 				for _, v := range a.Values {
 					if strings.EqualFold(v, value) {
-						return true, ldap.LDAPResultSuccess
+						return true, nil
 					}
 				}
 			}
@@ -53,52 +56,45 @@ func ServerApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 	case ldap.FilterPresent:
 		for _, a := range entry.Attributes {
 			if strings.EqualFold(a.Name, f.Data.String()) {
-				return true, ldap.LDAPResultSuccess
+				return true, nil
 			}
 		}
 
 	case ldap.FilterAnd:
 		for _, child := range f.Children {
-			ok, exitCode := ServerApplyFilter(child, entry)
-			if exitCode != ldap.LDAPResultSuccess {
-				return false, exitCode
-			}
-			if !ok {
-				return false, ldap.LDAPResultSuccess
+			ok, err := ApplyFilter(child, entry)
+			if err != nil || !ok {
+				return false, err
 			}
 		}
-		return true, ldap.LDAPResultSuccess
+
+		return true, nil
+
 	case ldap.FilterOr:
-		anyOk := false
 		for _, child := range f.Children {
-			ok, exitCode := ServerApplyFilter(child, entry)
-			if exitCode != ldap.LDAPResultSuccess {
-				return false, exitCode
-			} else if ok {
-				anyOk = true
+			ok, err := ApplyFilter(child, entry)
+			if err != nil || ok {
+				return ok, err
 			}
 		}
-		if anyOk {
-			return true, ldap.LDAPResultSuccess
-		}
+
 	case ldap.FilterNot:
 		if len(f.Children) != 1 {
-			return false, ldap.LDAPResultProtocolError
+			return false, &ldap.Error{ResultCode: ldap.LDAPResultProtocolError, Err: fmt.Errorf("%w: %w", ErrInvalidFilter, ErrInvalidPacketLength)}
 		}
-		ok, exitCode := ServerApplyFilter(f.Children[0], entry)
-		if exitCode != ldap.LDAPResultSuccess {
-			return false, exitCode
-		} else if !ok {
-			return true, ldap.LDAPResultSuccess
+		ok, err := ApplyFilter(f.Children[0], entry)
+		if err != nil {
+			return false, err
 		}
+		return !ok, nil
 
 	case ldap.FilterSubstrings:
 		if len(f.Children) != 2 {
-			return false, ldap.LDAPResultProtocolError
+			return false, &ldap.Error{ResultCode: ldap.LDAPResultProtocolError, Err: fmt.Errorf("%w: %w", ErrInvalidFilter, ErrInvalidPacketLength)}
 		}
 		attribute, ok := f.Children[0].Value.(string)
 		if !ok {
-			return false, ldap.LDAPResultProtocolError
+			return false, &ldap.Error{ResultCode: ldap.LDAPResultProtocolError, Err: ErrInvalidFilter}
 		}
 		var attr *ldap.EntryAttribute
 		for _, a := range entry.Attributes {
@@ -126,28 +122,32 @@ func ServerApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 				case ldap.FilterSubstringsAny:
 					matched = strings.Contains(value, search)
 				case ldap.FilterSubstringsFinal:
-					value,matched = strings.CutSuffix(value, search)
+					value, matched = strings.CutSuffix(value, search)
 				default:
 					continue valueLoop
 				}
 			}
 
 			if matched {
-				return true, ldap.LDAPResultSuccess
+				return true, nil
 			}
 		}
+
 	case ldap.FilterGreaterOrEqual: // TODO
-		return false, ldap.LDAPResultFilterError
+		return false, &ldap.Error{ResultCode: ldap.LDAPResultFilterError, Err: fmt.Errorf("filter %s not implemented", ldap.FilterMap[uint64(f.Tag)])}
+
 	case ldap.FilterLessOrEqual: // TODO
-		return false, ldap.LDAPResultFilterError
+		return false, &ldap.Error{ResultCode: ldap.LDAPResultFilterError, Err: fmt.Errorf("filter %s not implemented", ldap.FilterMap[uint64(f.Tag)])}
+
 	case ldap.FilterApproxMatch: // TODO
-		return false, ldap.LDAPResultFilterError
+		return false, &ldap.Error{ResultCode: ldap.LDAPResultFilterError, Err: fmt.Errorf("filter %s not implemented", ldap.FilterMap[uint64(f.Tag)])}
+
 	case ldap.FilterExtensibleMatch:
 		// We don't implement extensible matching server-side; defer to backend results.
-		return true, ldap.LDAPResultSuccess
+		return false, &ldap.Error{ResultCode: ldap.LDAPResultFilterError, Err: fmt.Errorf("filter %s not implemented", ldap.FilterMap[uint64(f.Tag)])}
 	}
 
-	return false, ldap.LDAPResultSuccess
+	return false, nil
 }
 
 func GetFilterAttribute(filter string, attr string) (string, error) {
@@ -163,7 +163,7 @@ func parseFilterAttribute(f *ber.Packet, attr string) (string, error) {
 	switch f.Tag {
 	case ldap.FilterEqualityMatch:
 		if len(f.Children) != 2 {
-			return "", ldap.NewError(ldap.LDAPResultProtocolError, errors.New("equality match must have only two children"))
+			return "", ldap.NewError(ldap.LDAPResultProtocolError, fmt.Errorf("%w: %w", ErrInvalidFilter, ErrInvalidPacketLength))
 		}
 		var (
 			attribute string
@@ -204,7 +204,7 @@ func parseFilterAttribute(f *ber.Packet, attr string) (string, error) {
 		}
 	case ldap.FilterNot:
 		if len(f.Children) != 1 {
-			return "", ldap.NewError(ldap.LDAPResultProtocolError, errors.New("not filter must have only one child"))
+			return "", ldap.NewError(ldap.LDAPResultProtocolError, fmt.Errorf("%w: %w", ErrInvalidFilter, ErrInvalidPacketLength))
 		}
 		subType, err := parseFilterAttribute(f.Children[0], attr)
 		if err != nil {
