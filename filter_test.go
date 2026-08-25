@@ -26,6 +26,9 @@ var testFilters = []compileTest{
 	{filterStr: "(sn<=" + ldap.EscapeFilter("Møller") + ")", filterType: ldap.FilterLessOrEqual},
 	{filterStr: "(sn=*)", filterType: ldap.FilterPresent},
 	{filterStr: "(sn~=" + ldap.EscapeFilter("Müller") + ")", filterType: ldap.FilterApproxMatch},
+	{filterStr: "(sn=M" + ldap.EscapeFilter("ö") + "*ller)", filterType: ldap.FilterSubstrings},
+	{filterStr: "(sn=M*" + ldap.EscapeFilter("ö") + "*ller)", filterType: ldap.FilterSubstrings},
+	{filterStr: "(sn=*" + ldap.EscapeFilter("ö") + "*ll*)", filterType: ldap.FilterSubstrings},
 	// { filterStr: "()", filterType: ldap.FilterExtensibleMatch },
 }
 
@@ -194,6 +197,47 @@ func TestApplyFilter(t *testing.T) {
 				status = "matched"
 			}
 			t.Errorf("Entry: %v %s: %q return code: %s", testInfo.Entry, status, testInfo.Filter, ldap.LDAPResultCodeMap[ldapResult])
+		}
+	}
+}
+
+// TestServerApplyFilterSubstrings checks that every component of a substring
+// assertion is matched, in order and without overlap.
+func TestServerApplyFilterSubstrings(t *testing.T) {
+	entry := func(cn string) *ldap.Entry {
+		return &ldap.Entry{
+			DN:         "cn=" + cn + ",ou=users,dc=example,dc=com",
+			Attributes: []*ldap.EntryAttribute{{Name: "cn", Values: []string{cn}}},
+		}
+	}
+	tests := []struct {
+		filterStr string
+		cn        string
+		expected  bool
+	}{
+		{"(cn=svc-*-prod)", "svc-door-prod", true},
+		{"(cn=svc-*-prod)", "svc-door-dev", false},
+		{"(cn=a*b*c)", "axxbyyc", true},
+		{"(cn=a*b*c)", "acb", false},
+		{"(cn=svc-*)", "svc-door-dev", true},
+		{"(cn=*door*)", "svc-door-dev", true},
+		{"(cn=*prod)", "svc-door-prod", true},
+		{"(cn=*prod)", "svc-door-dev", false},
+		// initial and final may not consume the same characters
+		{"(cn=prod*prod)", "prod", false},
+		{"(cn=prod*prod)", "prod-prod", true},
+	}
+	for _, tt := range tests {
+		filter, err := ldap.CompileFilter(tt.filterStr)
+		if err != nil {
+			t.Errorf("Problem compiling %s - %s", tt.filterStr, err.Error())
+			continue
+		}
+		keep, err := ApplyFilter(filter, entry(tt.cn))
+		if StatusCode(err) != ldap.LDAPResultSuccess {
+			t.Errorf("%s against %q: unexpected error %v", tt.filterStr, tt.cn, err)
+		} else if keep != tt.expected {
+			t.Errorf("%s against %q: expected %v, got %v", tt.filterStr, tt.cn, tt.expected, keep)
 		}
 	}
 }

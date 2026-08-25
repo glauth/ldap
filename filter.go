@@ -124,11 +124,11 @@ func ServerApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 
 				switch s.Tag {
 				case ldap.FilterSubstringsInitial:
-					matched = strings.HasPrefix(value, search)
+					value, matched = strings.CutPrefix(value, search)
 				case ldap.FilterSubstringsAny:
 					matched = strings.Contains(value, search)
 				case ldap.FilterSubstringsFinal:
-					matched = strings.HasSuffix(value, search)
+					value,matched = strings.CutSuffix(value, search)
 				default:
 					continue valueLoop
 				}
