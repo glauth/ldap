@@ -441,7 +441,7 @@ func TestSearchStats(t *testing.T) {
 
 type bindAnonOK struct{}
 
-func (b bindAnonOK) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
+func (b bindAnonOK) Bind(ctx context.Context, bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
 	if bindDN == "" && bindSimplePw == "" {
 		return nil, nil
 	}
@@ -450,7 +450,7 @@ func (b bindAnonOK) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.Simp
 
 type bindSimple struct{}
 
-func (b bindSimple) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
+func (b bindSimple) Bind(ctx context.Context, bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
 	if bindDN == "cn=testy,o=testers,c=test" && bindSimplePw == "iLike2test" {
 		return nil, nil
 	}
@@ -460,7 +460,7 @@ func (b bindSimple) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.Simp
 
 type bindSimple2 struct{}
 
-func (b bindSimple2) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
+func (b bindSimple2) Bind(ctx context.Context, bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
 	if bindDN == "cn=testy,o=testers,c=testz" && bindSimplePw == "ZLike2test" {
 		return nil, nil
 	}
@@ -470,13 +470,13 @@ func (b bindSimple2) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.Sim
 
 type bindPanic struct{}
 
-func (b bindPanic) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
+func (b bindPanic) Bind(ctx context.Context, bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
 	panic("test panic at the disco")
 }
 
 type bindCaseInsensitive struct{}
 
-func (b bindCaseInsensitive) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
+func (b bindCaseInsensitive) Bind(ctx context.Context, bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
 	if strings.EqualFold(bindDN, "cn=case,o=testers,c=test") && strings.EqualFold(bindSimplePw, "iLike2test") {
 		return nil, nil
 	}
@@ -486,7 +486,7 @@ func (b bindCaseInsensitive) Bind(bindDN, bindSimplePw string, conn net.Conn) (*
 
 type searchSimple struct{}
 
-func (s searchSimple) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
+func (s searchSimple) Search(ctx context.Context, boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
 	entries := []*ldap.Entry{
 		ldap.NewEntry("cn=ned,o=testers,c=test", map[string][]string{
 			"cn":            {"ned"},
@@ -523,7 +523,7 @@ func (s searchSimple) Search(boundDN string, searchReq ldap.SearchRequest, conn 
 
 type searchSimple2 struct{}
 
-func (s searchSimple2) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
+func (s searchSimple2) Search(ctx context.Context, boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
 	entries := []*ldap.Entry{
 		ldap.NewEntry("cn=hamburger,o=testers,c=testz", map[string][]string{
 			"cn":            {"hamburger"},
@@ -542,13 +542,13 @@ func (s searchSimple2) Search(boundDN string, searchReq ldap.SearchRequest, conn
 
 type searchPanic struct{}
 
-func (s searchPanic) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
+func (s searchPanic) Search(ctx context.Context, boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
 	panic("this is a test panic")
 }
 
 type searchControls struct{}
 
-func (s searchControls) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
+func (s searchControls) Search(ctx context.Context, boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
 	var entries []*ldap.Entry
 	if len(searchReq.Controls) == 1 && searchReq.Controls[0].GetControlType() == "1.2.3.4.5" {
 		newEntry := ldap.NewEntry("cn=hamburger,o=testers,c=testz", map[string][]string{
@@ -568,7 +568,7 @@ func (s searchControls) Search(boundDN string, searchReq ldap.SearchRequest, con
 
 type searchCaseInsensitive struct{}
 
-func (s searchCaseInsensitive) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
+func (s searchCaseInsensitive) Search(ctx context.Context, boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (*ldap.SearchResult, error) {
 	entries := []*ldap.Entry{
 		{DN: "cn=CASE,o=testers,c=test", Attributes: []*ldap.EntryAttribute{
 			{Name: "cn", Values: []string{"CaSe"}},

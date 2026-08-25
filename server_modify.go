@@ -1,6 +1,7 @@
 package ldaps
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -11,7 +12,7 @@ import (
 
 var ErrInvalidPacketLength = errors.New("invalid packet length")
 
-func HandleAddRequest(req *ber.Packet, boundDN string, fns map[string]Adder, conn net.Conn) error {
+func HandleAddRequest(ctx context.Context, req *ber.Packet, boundDN string, fns map[string]Adder, conn net.Conn) error {
 	if len(req.Children) != 2 {
 		return fmt.Errorf("error invalid %v: no attributes sent: %w", ldap.ApplicationMap[uint8(req.Tag)], ldap.NewError(ldap.LDAPResultProtocolError, ErrInvalidPacketLength))
 	}
@@ -48,10 +49,10 @@ func HandleAddRequest(req *ber.Packet, boundDN string, fns map[string]Adder, con
 	}
 	fn := routeFunc(boundDN, fnNames)
 
-	return fns[fn].Add(boundDN, addReq, conn)
+	return fns[fn].Add(ctx, boundDN, addReq, conn)
 }
 
-func HandleDeleteRequest(req *ber.Packet, boundDN string, fns map[string]Deleter, conn net.Conn) error {
+func HandleDeleteRequest(ctx context.Context, req *ber.Packet, boundDN string, fns map[string]Deleter, conn net.Conn) error {
 	deleteDN := ber.DecodeString(req.Data.Bytes())
 	fnNames := []string{}
 	for k := range fns {
@@ -59,10 +60,10 @@ func HandleDeleteRequest(req *ber.Packet, boundDN string, fns map[string]Deleter
 	}
 	fn := routeFunc(boundDN, fnNames)
 
-	return fns[fn].Delete(boundDN, deleteDN, conn)
+	return fns[fn].Delete(ctx, boundDN, deleteDN, conn)
 }
 
-func HandleModifyRequest(req *ber.Packet, boundDN string, fns map[string]Modifier, conn net.Conn) (*ldap.ModifyResult, error) {
+func HandleModifyRequest(ctx context.Context, req *ber.Packet, boundDN string, fns map[string]Modifier, conn net.Conn) (*ldap.ModifyResult, error) {
 	if len(req.Children) != 2 {
 		return nil, fmt.Errorf("error invalid %v: no attributes sent: %w", ldap.ApplicationMap[uint8(req.Tag)], ldap.NewError(ldap.LDAPResultProtocolError, ErrInvalidPacketLength))
 	}
@@ -114,10 +115,10 @@ func HandleModifyRequest(req *ber.Packet, boundDN string, fns map[string]Modifie
 	}
 	fn := routeFunc(boundDN, fnNames)
 
-	return fns[fn].Modify(boundDN, modReq, conn)
+	return fns[fn].Modify(ctx, boundDN, modReq, conn)
 }
 
-func HandleCompareRequest(req *ber.Packet, boundDN string, fns map[string]Comparer, conn net.Conn) error {
+func HandleCompareRequest(ctx context.Context, req *ber.Packet, boundDN string, fns map[string]Comparer, conn net.Conn) error {
 	if len(req.Children) != 2 {
 		return fmt.Errorf("error invalid %v: no attributes sent: %w", ldap.ApplicationMap[uint8(req.Tag)], ldap.NewError(ldap.LDAPResultProtocolError, ErrInvalidPacketLength))
 	}
@@ -154,10 +155,10 @@ func HandleCompareRequest(req *ber.Packet, boundDN string, fns map[string]Compar
 	}
 	fn := routeFunc(boundDN, fnNames)
 
-	return fns[fn].Compare(boundDN, compReq, conn)
+	return fns[fn].Compare(ctx, boundDN, compReq, conn)
 }
 
-func HandleExtendedRequest(req *ber.Packet, boundDN string, fns map[string]Extender, conn net.Conn) error {
+func HandleExtendedRequest(ctx context.Context, req *ber.Packet, boundDN string, fns map[string]Extender, conn net.Conn) error {
 	if len(req.Children) != 1 && len(req.Children) != 2 {
 		return fmt.Errorf("error invalid %v: no attributes sent: %w", ldap.ApplicationMap[uint8(req.Tag)], ldap.NewError(ldap.LDAPResultProtocolError, ErrInvalidPacketLength))
 	}
@@ -168,20 +169,20 @@ func HandleExtendedRequest(req *ber.Packet, boundDN string, fns map[string]Exten
 		fnNames = append(fnNames, k)
 	}
 	fn := routeFunc(boundDN, fnNames)
-	return fns[fn].Extended(boundDN, extReq, conn)
+	return fns[fn].Extended(ctx, boundDN, extReq, conn)
 }
 
-func HandleAbandonRequest(req *ber.Packet, boundDN string, fns map[string]Abandoner, conn net.Conn) error {
+func HandleAbandonRequest(ctx context.Context, req *ber.Packet, boundDN string, fns map[string]Abandoner, conn net.Conn) error {
 	fnNames := []string{}
 	for k := range fns {
 		fnNames = append(fnNames, k)
 	}
 	fn := routeFunc(boundDN, fnNames)
 
-	return fns[fn].Abandon(boundDN, conn)
+	return fns[fn].Abandon(ctx, boundDN, conn)
 }
 
-func HandleModifyDNRequest(req *ber.Packet, boundDN string, fns map[string]ModifyDNr, conn net.Conn) error {
+func HandleModifyDNRequest(ctx context.Context, req *ber.Packet, boundDN string, fns map[string]ModifyDNr, conn net.Conn) error {
 	if len(req.Children) != 3 && len(req.Children) != 4 {
 		return fmt.Errorf("error invalid %v: no attributes sent: %w", ldap.ApplicationMap[uint8(req.Tag)], ldap.NewError(ldap.LDAPResultProtocolError, ErrInvalidPacketLength))
 	}
@@ -211,5 +212,5 @@ func HandleModifyDNRequest(req *ber.Packet, boundDN string, fns map[string]Modif
 	}
 	fn := routeFunc(boundDN, fnNames)
 
-	return fns[fn].ModifyDN(boundDN, mdnReq, conn)
+	return fns[fn].ModifyDN(ctx, boundDN, mdnReq, conn)
 }

@@ -174,7 +174,7 @@ func TestModifyFail(t *testing.T) {
 
 type modifyTestHandler struct{}
 
-func (h modifyTestHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
+func (h modifyTestHandler) Bind(ctx context.Context, bindDN, bindSimplePw string, conn net.Conn) (*ldap.SimpleBindResult, error) {
 	if bindDN == "" && bindSimplePw == "" {
 		return nil, nil
 	}
@@ -182,7 +182,7 @@ func (h modifyTestHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (*ld
 	return nil, ldap.NewError(ldap.LDAPResultInvalidCredentials, ErrEmpty)
 }
 
-func (h modifyTestHandler) Add(boundDN string, req ldap.AddRequest, conn net.Conn) error {
+func (h modifyTestHandler) Add(ctx context.Context, boundDN string, req ldap.AddRequest, conn net.Conn) error {
 	// only succeed on expected contents of add.ldif:
 	if len(req.Attributes) == 5 && req.DN == "cn=Barbara Jensen,dc=example,dc=com" && req.Attributes[2].Type == "sn" && len(req.Attributes[2].Vals) == 1 && req.Attributes[2].Vals[0] == "Jensen" {
 		return nil
@@ -191,7 +191,7 @@ func (h modifyTestHandler) Add(boundDN string, req ldap.AddRequest, conn net.Con
 	return ldap.NewError(ldap.LDAPResultInsufficientAccessRights, ErrEmpty)
 }
 
-func (h modifyTestHandler) Delete(boundDN, deleteDN string, conn net.Conn) error {
+func (h modifyTestHandler) Delete(ctx context.Context, boundDN, deleteDN string, conn net.Conn) error {
 	// only succeed on expected deleteDN
 	if deleteDN == "cn=Delete Me,dc=example,dc=com" {
 		return nil
@@ -218,7 +218,7 @@ func extractChanges(req ldap.ModifyRequest) (deleteAttributes []ldap.Change, rep
 	return addAttributes, deleteAttributes, replaceAttributes, incrementAttributes, otherAttributes
 }
 
-func (h modifyTestHandler) Modify(boundDN string, req ldap.ModifyRequest, conn net.Conn) (*ldap.ModifyResult, error) {
+func (h modifyTestHandler) Modify(ctx context.Context, boundDN string, req ldap.ModifyRequest, conn net.Conn) (*ldap.ModifyResult, error) {
 	// only succeed on expected contents of modify.ldif:
 	addAttributes, deleteAttributes, replaceAttributes, incrementAttributes, otherAttributes := extractChanges(req)
 	if req.DN == "cn=testy,dc=example,dc=com" &&
@@ -234,7 +234,7 @@ func (h modifyTestHandler) Modify(boundDN string, req ldap.ModifyRequest, conn n
 	return &ldap.ModifyResult{}, ldap.NewError(ldap.LDAPResultInsufficientAccessRights, ErrEmpty)
 }
 
-func (h modifyTestHandler) ModifyDN(boundDN string, req ldap.ModifyDNRequest, conn net.Conn) error {
+func (h modifyTestHandler) ModifyDN(ctx context.Context, boundDN string, req ldap.ModifyDNRequest, conn net.Conn) error {
 	// TODO: Implement a test for this
 	return ldap.NewError(ldap.LDAPResultInsufficientAccessRights, ErrEmpty)
 }
