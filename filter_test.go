@@ -114,26 +114,39 @@ func BenchmarkFilterDecompile(b *testing.B) {
 	}
 }
 
-func TestGetFilterObjectClass(t *testing.T) {
-	c, err := GetFilterObjectClass("(objectClass=*)")
-	if err != nil {
-		t.Errorf("GetFilterObjectClass failed")
-	}
-	if c != "" {
-		t.Errorf("GetFilterObjectClass failed")
-	}
-	c, err = GetFilterObjectClass("(objectClass=posixAccount)")
-	if err != nil {
-		t.Errorf("GetFilterObjectClass failed")
-	}
-	if c != "posixaccount" {
-		t.Errorf("GetFilterObjectClass failed")
-	}
-	c, err = GetFilterObjectClass("(&(cn=awesome)(objectClass=posixGroup))")
-	if err != nil {
-		t.Errorf("GetFilterObjectClass failed")
-	}
-	if c != "posixgroup" {
-		t.Errorf("GetFilterObjectClass failed")
+func TestGetFilterAttribute(t *testing.T) {
+	for _, testInfo := range []struct {
+		Filter    string
+		Attribute string
+		Expected  string
+	}{
+		{
+			Filter:    "(objectClass=*)",
+			Attribute: "objectclass",
+			Expected:  "",
+		},
+		{
+			Filter:    "(objectClass=posixAccount)",
+			Attribute: "objectClass",
+			Expected:  "posixAccount",
+		},
+		{
+			Filter:    "(&(cn=awesome)(objectClass=posixGroup))",
+			Attribute: "objectClass",
+			Expected:  "posixGroup",
+		},
+		{
+			Filter:    "(&(cn=awesome)(objectClass=posixGroup))",
+			Attribute: "cn",
+			Expected:  "awesome",
+		},
+	} {
+		value, err := GetFilterAttribute(testInfo.Filter, testInfo.Attribute)
+		if err != nil {
+			t.Errorf("GetFilterAttribute failed: %v", err)
+		}
+		if value != testInfo.Expected {
+			t.Errorf("GetFilterAttribute: Expected %q got %q", testInfo.Expected, value)
+		}
 	}
 }

@@ -6,7 +6,6 @@ package ldaps
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 
 	ber "github.com/go-asn1-ber/asn1-ber"
@@ -131,45 +130,40 @@ func ServerApplyFilter(f *ber.Packet, entry *ldap.Entry) (bool, uint16) {
 	return false, ldap.LDAPResultSuccess
 }
 
-func GetFilterObjectClass(filter string) (string, error) {
+func GetFilterAttribute(filter string, attr string) (string, error) {
 	f, err := ldap.CompileFilter(filter)
 	if err != nil {
 		return "", err
 	}
-	return parseFilterObjectClass(f)
+	return parseFilterAttribute(f, attr)
 }
-func parseFilterObjectClass(f *ber.Packet) (string, error) {
+func parseFilterAttribute(f *ber.Packet, attr string) (string, error) {
 	objectClass := ""
 	switch ldap.FilterMap[uint64(f.Tag)] {
 	case "Equality Match":
 		if len(f.Children) != 2 {
 			return "", ldap.NewError(ldap.LDAPResultProtocolError, errors.New("equality match must have only two children"))
 		}
-		attribute, ok := f.Children[0].Value.(string)
-		if !ok {
-			return objectClass, ldap.NewError(ldap.LDAPResultProtocolError, errors.New("equality match must be a string"))
-		}
 		var (
 			attribute string
 			value     string
 			ok        bool
 		)
+
 		attribute, ok = f.Children[0].Value.(string)
 		if !ok {
-			return "", fmt.Errorf("this should have been a string: %v", f.Children[0].Value)
+			return "", ldap.NewError(ldap.LDAPResultProtocolError, errors.New("equality match must be a string"))
 		}
-
 		value, ok = f.Children[1].Value.(string)
 		if !ok {
-			return "", fmt.Errorf("this should have been a string: %v", f.Children[1].Value)
+			return "", ldap.NewError(ldap.LDAPResultProtocolError, errors.New("equality match must be a string"))
 		}
-
-		if strings.EqualFold(attribute, "objectclass") {
-			objectClass = strings.ToLower(value)
+		if strings.EqualFold(attribute, attr) {
+			objectClass = value
 		}
 	case "And":
 		for _, child := range f.Children {
-			subType, err := parseFilterObjectClass(child)
+			subType, err := parseFilterAttribute(child, attr)
 			if err != nil {
 				return "", err
 			}
@@ -179,7 +173,7 @@ func parseFilterObjectClass(f *ber.Packet) (string, error) {
 		}
 	case "Or":
 		for _, child := range f.Children {
-			subType, err := parseFilterObjectClass(child)
+			subType, err := parseFilterAttribute(child, attr)
 			if err != nil {
 				return "", err
 			}
@@ -191,7 +185,7 @@ func parseFilterObjectClass(f *ber.Packet) (string, error) {
 		if len(f.Children) != 1 {
 			return "", ldap.NewError(ldap.LDAPResultProtocolError, errors.New("not filter must have only one child"))
 		}
-		subType, err := parseFilterObjectClass(f.Children[0])
+		subType, err := parseFilterAttribute(f.Children[0], attr)
 		if err != nil {
 			return "", err
 		}
@@ -200,5 +194,5 @@ func parseFilterObjectClass(f *ber.Packet) (string, error) {
 		}
 
 	}
-	return strings.ToLower(objectClass), nil
+	return objectClass, nil
 }
