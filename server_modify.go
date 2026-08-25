@@ -1,42 +1,43 @@
-package ldap
+package ldaps
 
 import (
 	"log"
 	"net"
 
 	ber "github.com/go-asn1-ber/asn1-ber"
+	"github.com/go-ldap/ldap/v3"
 )
 
-func HandleAddRequest(req *ber.Packet, boundDN string, fns map[string]Adder, conn net.Conn) (resultCode LDAPResultCode) {
+func HandleAddRequest(req *ber.Packet, boundDN string, fns map[string]Adder, conn net.Conn) (resultCode uint16) {
 	if len(req.Children) != 2 {
-		return LDAPResultProtocolError
+		return ldap.LDAPResultProtocolError
 	}
 	var ok bool
-	addReq := AddRequest{}
-	addReq.dn, ok = req.Children[0].Value.(string)
+	addReq := ldap.AddRequest{}
+	addReq.DN, ok = req.Children[0].Value.(string)
 	if !ok {
-		return LDAPResultProtocolError
+		return ldap.LDAPResultProtocolError
 	}
-	addReq.attributes = []Attribute{}
+	addReq.Attributes = []ldap.Attribute{}
 	for _, attr := range req.Children[1].Children {
 		if len(attr.Children) != 2 {
-			return LDAPResultProtocolError
+			return ldap.LDAPResultProtocolError
 		}
 
-		a := Attribute{}
-		a.attrType, ok = attr.Children[0].Value.(string)
+		a := ldap.Attribute{}
+		a.Type, ok = attr.Children[0].Value.(string)
 		if !ok {
-			return LDAPResultProtocolError
+			return ldap.LDAPResultProtocolError
 		}
-		a.attrVals = []string{}
+		a.Vals = []string{}
 		for _, val := range attr.Children[1].Children {
 			v, ok := val.Value.(string)
 			if !ok {
-				return LDAPResultProtocolError
+				return ldap.LDAPResultProtocolError
 			}
-			a.attrVals = append(a.attrVals, v)
+			a.Vals = append(a.Vals, v)
 		}
-		addReq.attributes = append(addReq.attributes, a)
+		addReq.Attributes = append(addReq.Attributes, a)
 	}
 	fnNames := []string{}
 	for k := range fns {
@@ -45,13 +46,13 @@ func HandleAddRequest(req *ber.Packet, boundDN string, fns map[string]Adder, con
 	fn := routeFunc(boundDN, fnNames)
 	resultCode, err := fns[fn].Add(boundDN, addReq, conn)
 	if err != nil {
-		log.Printf("AddFn Error %s", err.Error())
-		return LDAPResultOperationsError
+		log.Printf("AddFn Error %v", err)
+		return ldap.LDAPResultOperationsError
 	}
 	return resultCode
 }
 
-func HandleDeleteRequest(req *ber.Packet, boundDN string, fns map[string]Deleter, conn net.Conn) (resultCode LDAPResultCode) {
+func HandleDeleteRequest(req *ber.Packet, boundDN string, fns map[string]Deleter, conn net.Conn) (resultCode uint16) {
 	deleteDN := ber.DecodeString(req.Data.Bytes())
 	fnNames := []string{}
 	for k := range fns {
@@ -60,56 +61,56 @@ func HandleDeleteRequest(req *ber.Packet, boundDN string, fns map[string]Deleter
 	fn := routeFunc(boundDN, fnNames)
 	resultCode, err := fns[fn].Delete(boundDN, deleteDN, conn)
 	if err != nil {
-		log.Printf("DeleteFn Error %s", err.Error())
-		return LDAPResultOperationsError
+		log.Printf("DeleteFn Error %v", err)
+		return ldap.LDAPResultOperationsError
 	}
 	return resultCode
 }
 
-func HandleModifyRequest(req *ber.Packet, boundDN string, fns map[string]Modifier, conn net.Conn) (resultCode LDAPResultCode) {
+func HandleModifyRequest(req *ber.Packet, boundDN string, fns map[string]Modifier, conn net.Conn) (resultCode uint16) {
 	if len(req.Children) != 2 {
-		return LDAPResultProtocolError
+		return ldap.LDAPResultProtocolError
 	}
 	var ok bool
-	modReq := ModifyRequest{}
-	modReq.Dn, ok = req.Children[0].Value.(string)
+	modReq := ldap.ModifyRequest{}
+	modReq.DN, ok = req.Children[0].Value.(string)
 	if !ok {
-		return LDAPResultProtocolError
+		return ldap.LDAPResultProtocolError
 	}
 	for _, change := range req.Children[1].Children {
 		if len(change.Children) != 2 {
-			return LDAPResultProtocolError
+			return ldap.LDAPResultProtocolError
 		}
-		attr := PartialAttribute{}
+		attr := ldap.PartialAttribute{}
 		attrs := change.Children[1].Children
 		if len(attrs) != 2 {
-			return LDAPResultProtocolError
+			return ldap.LDAPResultProtocolError
 		}
-		attr.AttrType, ok = attrs[0].Value.(string)
+		attr.Type, ok = attrs[0].Value.(string)
 		if !ok {
-			return LDAPResultProtocolError
+			return ldap.LDAPResultProtocolError
 		}
 		for _, val := range attrs[1].Children {
 			v, ok := val.Value.(string)
 			if !ok {
-				return LDAPResultProtocolError
+				return ldap.LDAPResultProtocolError
 			}
-			attr.AttrVals = append(attr.AttrVals, v)
+			attr.Vals = append(attr.Vals, v)
 		}
 		op, ok := change.Children[0].Value.(int64)
 		if !ok {
-			return LDAPResultProtocolError
+			return ldap.LDAPResultProtocolError
 		}
 		switch op {
 		default:
 			log.Printf("Unrecognized Modify attribute %d", op)
-			return LDAPResultProtocolError
-		case AddAttribute:
-			modReq.Add(attr.AttrType, attr.AttrVals)
-		case DeleteAttribute:
-			modReq.Delete(attr.AttrType, attr.AttrVals)
-		case ReplaceAttribute:
-			modReq.Replace(attr.AttrType, attr.AttrVals)
+			return ldap.LDAPResultProtocolError
+		case ldap.AddAttribute:
+			modReq.Add(attr.Type, attr.Vals)
+		case ldap.DeleteAttribute:
+			modReq.Delete(attr.Type, attr.Vals)
+		case ldap.ReplaceAttribute:
+			modReq.Replace(attr.Type, attr.Vals)
 		}
 	}
 	fnNames := []string{}
@@ -119,35 +120,36 @@ func HandleModifyRequest(req *ber.Packet, boundDN string, fns map[string]Modifie
 	fn := routeFunc(boundDN, fnNames)
 	resultCode, err := fns[fn].Modify(boundDN, modReq, conn)
 	if err != nil {
-		log.Printf("ModifyFn Error %s", err.Error())
-		return LDAPResultOperationsError
+		log.Printf("ModifyFn Error %v", err)
+		return ldap.LDAPResultOperationsError
 	}
 	return resultCode
 }
 
-func HandleCompareRequest(req *ber.Packet, boundDN string, fns map[string]Comparer, conn net.Conn) (resultCode LDAPResultCode) {
+func HandleCompareRequest(req *ber.Packet, boundDN string, fns map[string]Comparer, conn net.Conn) (resultCode uint16) {
 	if len(req.Children) != 2 {
-		return LDAPResultProtocolError
+		return ldap.LDAPResultProtocolError
 	}
 	var ok bool
-	compReq := CompareRequest{}
-	compReq.dn, ok = req.Children[0].Value.(string)
+	compReq := ldap.CompareRequest{}
+	compReq.DN, ok = req.Children[0].Value.(string)
 	if !ok {
-		return LDAPResultProtocolError
+		return ldap.LDAPResultProtocolError
 	}
 	ava := req.Children[1]
 	if len(ava.Children) != 2 {
-		return LDAPResultProtocolError
+		return ldap.LDAPResultProtocolError
 	}
 	attr, ok := ava.Children[0].Value.(string)
 	if !ok {
-		return LDAPResultProtocolError
+		return ldap.LDAPResultProtocolError
 	}
 	val, ok := ava.Children[1].Value.(string)
 	if !ok {
-		return LDAPResultProtocolError
+		return ldap.LDAPResultProtocolError
 	}
-	compReq.ava = []AttributeValueAssertion{{attr, val}}
+	compReq.Attribute = attr
+	compReq.Value = val
 	fnNames := []string{}
 	for k := range fns {
 		fnNames = append(fnNames, k)
@@ -155,22 +157,18 @@ func HandleCompareRequest(req *ber.Packet, boundDN string, fns map[string]Compar
 	fn := routeFunc(boundDN, fnNames)
 	resultCode, err := fns[fn].Compare(boundDN, compReq, conn)
 	if err != nil {
-		log.Printf("CompareFn Error %s", err.Error())
-		return LDAPResultOperationsError
+		log.Printf("CompareFn Error %v", err)
+		return ldap.LDAPResultOperationsError
 	}
 	return resultCode
 }
 
-func HandleExtendedRequest(req *ber.Packet, boundDN string, fns map[string]Extender, conn net.Conn) (resultCode LDAPResultCode) {
+func HandleExtendedRequest(req *ber.Packet, boundDN string, fns map[string]Extender, conn net.Conn) (resultCode uint16) {
 	if len(req.Children) != 1 && len(req.Children) != 2 {
-		return LDAPResultProtocolError
+		return ldap.LDAPResultProtocolError
 	}
 	name := ber.DecodeString(req.Children[0].Data.Bytes())
-	var val string
-	if len(req.Children) == 2 {
-		val = ber.DecodeString(req.Children[1].Data.Bytes())
-	}
-	extReq := ExtendedRequest{name, val}
+	extReq := ldap.ExtendedRequest{Name: name, Value: req}
 	fnNames := []string{}
 	for k := range fns {
 		fnNames = append(fnNames, k)
@@ -178,8 +176,8 @@ func HandleExtendedRequest(req *ber.Packet, boundDN string, fns map[string]Exten
 	fn := routeFunc(boundDN, fnNames)
 	resultCode, err := fns[fn].Extended(boundDN, extReq, conn)
 	if err != nil {
-		log.Printf("ExtendedFn Error %s", err.Error())
-		return LDAPResultOperationsError
+		log.Printf("ExtendedFn Error %v", err)
+		return ldap.LDAPResultOperationsError
 	}
 	return resultCode
 }
@@ -194,28 +192,28 @@ func HandleAbandonRequest(req *ber.Packet, boundDN string, fns map[string]Abando
 	return err
 }
 
-func HandleModifyDNRequest(req *ber.Packet, boundDN string, fns map[string]ModifyDNr, conn net.Conn) (resultCode LDAPResultCode) {
+func HandleModifyDNRequest(req *ber.Packet, boundDN string, fns map[string]ModifyDNr, conn net.Conn) (resultCode uint16) {
 	if len(req.Children) != 3 && len(req.Children) != 4 {
-		return LDAPResultProtocolError
+		return ldap.LDAPResultProtocolError
 	}
 	var ok bool
-	mdnReq := ModifyDNRequest{}
-	mdnReq.dn, ok = req.Children[0].Value.(string)
+	mdnReq := ldap.ModifyDNRequest{}
+	mdnReq.DN, ok = req.Children[0].Value.(string)
 	if !ok {
-		return LDAPResultProtocolError
+		return ldap.LDAPResultProtocolError
 	}
-	mdnReq.newrdn, ok = req.Children[1].Value.(string)
+	mdnReq.NewRDN, ok = req.Children[1].Value.(string)
 	if !ok {
-		return LDAPResultProtocolError
+		return ldap.LDAPResultProtocolError
 	}
-	mdnReq.deleteoldrdn, ok = req.Children[2].Value.(bool)
+	mdnReq.DeleteOldRDN, ok = req.Children[2].Value.(bool)
 	if !ok {
-		return LDAPResultProtocolError
+		return ldap.LDAPResultProtocolError
 	}
 	if len(req.Children) == 4 {
-		mdnReq.newSuperior, ok = req.Children[3].Value.(string)
+		mdnReq.NewSuperior, ok = req.Children[3].Value.(string)
 		if !ok {
-			return LDAPResultProtocolError
+			return ldap.LDAPResultProtocolError
 		}
 	}
 	fnNames := []string{}
@@ -225,8 +223,8 @@ func HandleModifyDNRequest(req *ber.Packet, boundDN string, fns map[string]Modif
 	fn := routeFunc(boundDN, fnNames)
 	resultCode, err := fns[fn].ModifyDN(boundDN, mdnReq, conn)
 	if err != nil {
-		log.Printf("ModifyDN Error %s", err.Error())
-		return LDAPResultOperationsError
+		log.Printf("ModifyDN Error %v", err)
+		return ldap.LDAPResultOperationsError
 	}
 	return resultCode
 }
